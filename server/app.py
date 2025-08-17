@@ -537,8 +537,15 @@ def parse_topology_matrix():
 def get_network_interfaces():
     """Get network interface information including Mellanox NICs"""
     try:
-        # Get network interfaces
-        result = run_cmd("ip addr show")
+        # Get network interfaces using ifconfig as fallback if ip is not available
+        try:
+            result = run_cmd("ip addr show")
+        except:
+            try:
+                result = run_cmd("ifconfig -a")
+            except:
+                return []
+        
         interfaces = []
         
         current_interface = None
@@ -631,23 +638,27 @@ def detect_gpu_topology():
             # Get connections from topology matrix
             if gpu_key in topology_matrix:
                 for target_gpu, conn_type in topology_matrix[gpu_key].items():
-                    target_idx = int(target_gpu.replace('GPU', ''))
-                    
-                    # Map connection type
-                    conn_info = connection_map.get(conn_type, {
-                        'type': conn_type,
-                        'bandwidth': 32,
-                        'description': f'Unknown connection type {conn_type}'
-                    })
-                    
-                    if conn_info['bandwidth'] > 0:  # Skip disabled connections
-                        connections.append({
-                            'target': f"gpu-{target_idx}",
-                            'type': conn_info['type'],
-                            'bandwidth': conn_info['bandwidth'],
-                            'description': conn_info['description'],
-                            'raw_type': conn_type
+                    try:
+                        target_idx = int(target_gpu.replace('GPU', ''))
+                        
+                        # Map connection type
+                        conn_info = connection_map.get(conn_type, {
+                            'type': conn_type,
+                            'bandwidth': 32,
+                            'description': f'Unknown connection type {conn_type}'
                         })
+                        
+                        if conn_info['bandwidth'] > 0:  # Skip disabled connections
+                            connections.append({
+                                'target': f"gpu-{target_idx}",
+                                'type': conn_info['type'],
+                                'bandwidth': conn_info['bandwidth'],
+                                'description': conn_info['description'],
+                                'raw_type': conn_type
+                            })
+                    except ValueError:
+                        print(f"Skipping invalid GPU target: {target_gpu}")
+                        continue
             
             # Add GPU with enhanced information
             gpu_info = {
