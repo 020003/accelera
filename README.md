@@ -13,12 +13,8 @@ Monitor NVIDIA GPUs and Ollama AI models across multiple hosts from a single, co
 
 ### Dashboard Views
 
-| View | Description |
-|------|-------------|
-| ![Overview](docs/screenshots/overview-tab.png) | **Overview Tab**: Multi-host summary with aggregated GPU and Ollama metrics |
-| ![Host Tab](docs/screenshots/host-tab.png) | **Host Tab**: Detailed GPU monitoring with process tracking |
-| ![Ollama Models](docs/screenshots/ollama-tab.png) | **AI Models Tab**: Ollama model inventory and performance |
-| ![Settings](docs/screenshots/settings-tab.png) | **Settings Tab**: Host management and configuration |
+![Host Tab](docs/screenshots/host-tab.png)
+*Individual host monitoring with detailed GPU metrics and Ollama integration*
 
 ## ✨ Key Features
 
@@ -241,8 +237,6 @@ GET /api/health               # Server health status
 
 The dashboard includes built-in support for monitoring Ollama AI model servers alongside GPU metrics.
 
-![Ollama Integration](docs/screenshots/ollama-models.png)
-*Ollama AI models view showing installed models and performance metrics*
 
 ### Features
 
@@ -259,8 +253,6 @@ The dashboard includes built-in support for monitoring Ollama AI model servers a
 3. **Real-time Metrics**: Fetches performance data from Ollama's `/api/ps` and `/api/tags` endpoints
 4. **Integrated Display**: Shows Ollama metrics directly in host tabs alongside GPU data
 
-![Ollama Metrics](docs/screenshots/ollama-metrics.png)
-*Real-time Ollama performance metrics integrated with GPU monitoring*
 
 ### Supported Metrics
 
