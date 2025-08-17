@@ -6,6 +6,20 @@ Monitor NVIDIA GPUs and Ollama AI models across multiple hosts from a single, co
 
 ![GPU Monitor Dashboard](https://img.shields.io/badge/status-active-brightgreen) ![License](https://img.shields.io/badge/license-MIT-blue) ![Security](https://img.shields.io/badge/security-sanitized-green) ![Docker](https://img.shields.io/badge/docker-supported-blue) ![TypeScript](https://img.shields.io/badge/TypeScript-ready-blue)
 
+![Dashboard Overview](docs/screenshots/dashboard-overview.png)
+*Multi-host GPU monitoring dashboard with real-time metrics and Ollama AI model integration*
+
+## 📸 Screenshots
+
+### Dashboard Views
+
+| View | Description |
+|------|-------------|
+| ![Overview](docs/screenshots/overview-tab.png) | **Overview Tab**: Multi-host summary with aggregated GPU and Ollama metrics |
+| ![Host Tab](docs/screenshots/host-tab.png) | **Host Tab**: Detailed GPU monitoring with process tracking |
+| ![Ollama Models](docs/screenshots/ollama-tab.png) | **AI Models Tab**: Ollama model inventory and performance |
+| ![Settings](docs/screenshots/settings-tab.png) | **Settings Tab**: Host management and configuration |
+
 ## ✨ Key Features
 
 | Feature | Description |
@@ -227,6 +241,9 @@ GET /api/health               # Server health status
 
 The dashboard includes built-in support for monitoring Ollama AI model servers alongside GPU metrics.
 
+![Ollama Integration](docs/screenshots/ollama-models.png)
+*Ollama AI models view showing installed models and performance metrics*
+
 ### Features
 
 - **Auto-Discovery**: Automatically detects Ollama instances running on GPU hosts
@@ -238,9 +255,12 @@ The dashboard includes built-in support for monitoring Ollama AI model servers a
 ### How It Works
 
 1. **Automatic Scanning**: The dashboard scans common ports (11434, 8080, 3000, 5000) for Ollama services
-2. **CORS Bypass**: Uses backend proxy to avoid browser CORS restrictions
+2. **Direct API Communication**: Connects directly to Ollama endpoints on GPU hosts
 3. **Real-time Metrics**: Fetches performance data from Ollama's `/api/ps` and `/api/tags` endpoints
 4. **Integrated Display**: Shows Ollama metrics directly in host tabs alongside GPU data
+
+![Ollama Metrics](docs/screenshots/ollama-metrics.png)
+*Real-time Ollama performance metrics integrated with GPU monitoring*
 
 ### Supported Metrics
 
@@ -252,6 +272,13 @@ The dashboard includes built-in support for monitoring Ollama AI model servers a
 ### Configuration
 
 No additional configuration is required. The dashboard will automatically discover and monitor Ollama instances on any configured GPU host.
+
+### Example Models Display
+
+When Ollama is detected on a host, you'll see:
+- **Overview Cards**: AI Models count, Model Storage usage, Request metrics, Performance stats
+- **Models Tab**: Detailed list of all installed models with sizes
+- **Visual Indicators**: Bot icon showing Ollama detection status
 
 ## 🚀 Quick Start
 
@@ -526,9 +553,24 @@ npm run test:e2e
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## 📝 Changelog
+
+### Latest Updates (v2.1.0)
+- ✅ **Ollama Integration**: Auto-discovery and monitoring of AI models
+- ✅ **Direct API Communication**: Frontend connects directly to GPU host backends
+- ✅ **Flask Route Fixes**: Corrected route decorator syntax for all endpoints
+- ✅ **Enhanced UI**: Added AI model tabs and performance metrics display
+- ✅ **Security Improvements**: Removed sensitive information from version control
+
+### Previous Releases
+- v2.0.0: Multi-host monitoring support
+- v1.5.0: Docker containerization
+- v1.0.0: Initial release with single-host GPU monitoring
+
 ## 🙏 Acknowledgments
 
 - **NVIDIA** for GPU monitoring tools and drivers
+- **Ollama** for local AI model serving
 - **React** community for excellent libraries and tools
 - **Flask** community for lightweight web framework
 - **Tailwind CSS** for modern styling utilities
