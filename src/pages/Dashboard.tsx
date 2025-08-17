@@ -73,14 +73,17 @@ export default function Dashboard() {
   // Helper function to check if Ollama is available on a host
   const checkOllamaAvailability = async (hostUrl: string) => {
     try {
-      // Use backend proxy to avoid CORS issues
-      const apiUrl = import.meta.env.VITE_API_URL || window.location.origin.replace(':8080', ':5000');
-      const response = await fetch(`${apiUrl}/api/ollama/discover`, {
+      // Extract the base URL from the host URL (remove the /nvidia-smi.json path)
+      const url = new URL(hostUrl);
+      const baseUrl = `${url.protocol}//${url.host}`;
+      
+      // Call the Ollama discovery endpoint directly on the GPU host
+      const response = await fetch(`${baseUrl}/api/ollama/discover`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ hostUrl }),
+        body: JSON.stringify({ hostUrl: baseUrl }),
         signal: AbortSignal.timeout(10000) // 10 second timeout
       });
       

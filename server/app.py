@@ -266,7 +266,7 @@ def save_hosts(hosts):
     except Exception:
         return False
 
-@app.get("/nvidia-smi.json")
+@app.route("/nvidia-smi.json", methods=['GET'])
 def nvidia():
     return jsonify({
         "host": socket.gethostname(),
@@ -274,12 +274,12 @@ def nvidia():
         "gpus": get_gpus(),
     })
 
-@app.get("/api/hosts")
+@app.route("/api/hosts", methods=['GET'])
 def get_hosts():
     """Get all configured hosts"""
     return jsonify(load_hosts())
 
-@app.post("/api/hosts")
+@app.route("/api/hosts", methods=['POST'])
 def add_host():
     """Add a new host"""
     data = request.get_json()
@@ -307,7 +307,7 @@ def add_host():
     else:
         return jsonify({"error": "Failed to save host"}), 500
 
-@app.delete("/api/hosts/<path:url>")
+@app.route("/api/hosts/<path:url>", methods=['DELETE'])
 def delete_host(url):
     """Delete a host by URL"""
     hosts = load_hosts()
@@ -409,7 +409,7 @@ def check_ollama_availability(host_url):
     except Exception:
         return {"isAvailable": False}
 
-@app.post("/api/ollama/discover")
+@app.route("/api/ollama/discover", methods=['POST'])
 def discover_ollama():
     """Discover Ollama on a given host URL"""
     data = request.get_json()
@@ -419,7 +419,7 @@ def discover_ollama():
     result = check_ollama_availability(data['hostUrl'])
     return jsonify(result)
 
-@app.get("/api/health")
+@app.route("/api/health", methods=['GET'])
 def health():
     """Health check endpoint"""
     return jsonify({"status": "ok", "timestamp": datetime.utcnow().isoformat() + "Z"})
