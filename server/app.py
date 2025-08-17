@@ -8,6 +8,9 @@ import requests
 from datetime import datetime
 from dotenv import load_dotenv
 from urllib.parse import urlparse
+import time
+import threading
+from collections import defaultdict, deque
 
 # Load environment variables from .env file
 load_dotenv()
@@ -25,6 +28,12 @@ if CORS_ORIGINS == '*':
     CORS(app, origins='*')
 else:
     CORS(app, origins=CORS_ORIGINS.split(','))
+
+# Global data storage for advanced features
+historical_data = defaultdict(lambda: deque(maxlen=1440))  # 24 hours of data (1 minute intervals)
+workload_events = deque(maxlen=1000)  # Store recent workload events
+topology_cache = {}
+data_lock = threading.Lock()
 
 def run_cmd(cmd: str) -> str:
     return subprocess.check_output(cmd, shell=True, text=True).strip()
@@ -423,6 +432,316 @@ def discover_ollama():
 def health():
     """Health check endpoint"""
     return jsonify({"status": "ok", "timestamp": datetime.utcnow().isoformat() + "Z"})
+
+def collect_historical_data():
+    """Collect historical data for heatmap visualization"""
+    try:
+        gpus = get_gpus()
+        timestamp = datetime.utcnow().isoformat()
+        hostname = socket.gethostname()
+        
+        with data_lock:
+            for gpu in gpus:
+                key = f"{hostname}:gpu-{gpu['id']}"
+                historical_data[f"{key}:utilization"].append({
+                    'timestamp': timestamp,
+                    'value': gpu['utilization']
+                })
+                historical_data[f"{key}:temperature"].append({
+                    'timestamp': timestamp,
+                    'value': gpu['temperature']
+                })
+                historical_data[f"{key}:power"].append({
+                    'timestamp': timestamp,
+                    'value': gpu['power']['draw']
+                })
+                historical_data[f"{key}:memory"].append({
+                    'timestamp': timestamp,
+                    'value': (gpu['memory']['used'] / gpu['memory']['total']) * 100
+                })
+    except Exception as e:
+        print(f"Error collecting historical data: {e}")
+
+def detect_gpu_topology():
+    """Detect GPU topology and interconnections"""
+    try:
+        # Get basic GPU info
+        gpus = get_gpus()
+        hostname = socket.gethostname()
+        
+        # Try to get topology info using nvidia-ml-py
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            
+            topology_gpus = []
+            for i, gpu in enumerate(gpus):
+                gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                connections = []
+                
+                # Check connections to other GPUs
+                for j, other_gpu in enumerate(gpus):
+                    if i != j:
+                        try:
+                            other_handle = pynvml.nvmlDeviceGetHandleByIndex(j)
+                            # Try to get P2P capability
+                            p2p_status = pynvml.nvmlDeviceGetP2PStatus(gpu_handle, other_handle, pynvml.NVML_P2P_CAPS_INDEX_READ)
+                            if p2p_status == pynvml.NVML_P2P_STATUS_OK:
+                                # Assume NVLink for P2P capable GPUs
+                                connections.append({
+                                    'target': f"gpu-{j}",
+                                    'type': 'NVLink',
+                                    'bandwidth': 600  # Estimated NVLink bandwidth
+                                })
+                            else:
+                                # Fallback to PCIe
+                                connections.append({
+                                    'target': f"gpu-{j}",
+                                    'type': 'PCIe',
+                                    'bandwidth': 32  # PCIe 4.0 x16
+                                })
+                        except:
+                            # Fallback connection
+                            connections.append({
+                                'target': f"gpu-{j}",
+                                'type': 'PCIe',
+                                'bandwidth': 32
+                            })
+                
+                topology_gpus.append({
+                    'id': f"gpu-{i}",
+                    'name': gpu['name'],
+                    'host': hostname,
+                    'utilization': gpu['utilization'],
+                    'memory': gpu['memory'],
+                    'temperature': gpu['temperature'],
+                    'power': gpu['power'],
+                    'connections': connections
+                })
+            
+            return {'gpus': topology_gpus}
+            
+        except ImportError:
+            # Fallback topology without pynvml
+            topology_gpus = []
+            for i, gpu in enumerate(gpus):
+                connections = []
+                # Create basic mesh topology
+                for j in range(len(gpus)):
+                    if i != j:
+                        connections.append({
+                            'target': f"gpu-{j}",
+                            'type': 'PCIe',
+                            'bandwidth': 32
+                        })
+                
+                topology_gpus.append({
+                    'id': f"gpu-{i}",
+                    'name': gpu['name'],
+                    'host': hostname,
+                    'utilization': gpu['utilization'],
+                    'memory': gpu['memory'],
+                    'temperature': gpu['temperature'],
+                    'power': gpu['power'],
+                    'connections': connections
+                })
+            
+            return {'gpus': topology_gpus}
+            
+    except Exception as e:
+        print(f"Error detecting topology: {e}")
+        return {'gpus': []}
+
+def simulate_workload_event(event_type, model_name, status):
+    """Simulate AI workload events for timeline"""
+    try:
+        hostname = socket.gethostname()
+        event = {
+            'id': f"event-{int(time.time() * 1000)}",
+            'content': f"{model_name} - {event_type}",
+            'start': datetime.utcnow().isoformat(),
+            'end': None if status == 'running' else (datetime.utcnow()).isoformat(),
+            'type': event_type,
+            'host': hostname,
+            'gpu': f"GPU-{len(workload_events) % 4}",
+            'model': model_name,
+            'status': status,
+            'metadata': {
+                'tokensPerSecond': 45.2 if event_type == 'inference' else 0,
+                'requestCount': len(workload_events) + 1,
+                'memoryUsage': 12000 + (len(workload_events) % 8) * 1000,
+                'duration': 120 if status != 'running' else 0
+            }
+        }
+        
+        with data_lock:
+            workload_events.append(event)
+            
+    except Exception as e:
+        print(f"Error creating workload event: {e}")
+
+@app.route("/api/topology", methods=['GET'])
+def get_topology():
+    """Get GPU topology information"""
+    try:
+        # Use cached topology or generate new one
+        cache_key = f"topology_{socket.gethostname()}"
+        if cache_key not in topology_cache or time.time() - topology_cache[cache_key]['timestamp'] > 300:  # 5 min cache
+            topology_cache[cache_key] = {
+                'data': detect_gpu_topology(),
+                'timestamp': time.time()
+            }
+        
+        return jsonify(topology_cache[cache_key]['data'])
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/heatmap", methods=['GET'])
+def get_heatmap_data():
+    """Get historical data for 3D heatmap"""
+    try:
+        metric = request.args.get('metric', 'utilization')
+        hours = int(request.args.get('hours', 2))
+        
+        # Get list of hosts from historical data
+        hosts = set()
+        timestamps = set()
+        
+        with data_lock:
+            for key in historical_data.keys():
+                if f":{metric}" in key:
+                    host_gpu = key.replace(f":{metric}", "")
+                    hosts.add(host_gpu.split(':')[0])
+                    for entry in historical_data[key]:
+                        timestamps.add(entry['timestamp'])
+        
+        hosts = sorted(list(hosts))
+        timestamps = sorted(list(timestamps))
+        
+        # Limit to requested hours
+        if len(timestamps) > hours * 60:
+            timestamps = timestamps[-(hours * 60):]
+        
+        # Build matrix
+        metrics_matrix = []
+        for host in hosts:
+            host_data = []
+            for timestamp in timestamps:
+                # Find closest data point for this host/timestamp
+                value = 0
+                for gpu_id in range(4):  # Assume max 4 GPUs per host
+                    key = f"{host}:gpu-{gpu_id}:{metric}"
+                    if key in historical_data:
+                        for entry in historical_data[key]:
+                            if entry['timestamp'] == timestamp:
+                                value = max(value, entry['value'])
+                                break
+                host_data.append(value)
+            metrics_matrix.append(host_data)
+        
+        # Generate demo data if no real data
+        if not metrics_matrix:
+            hosts = ['server-1', 'server-2', 'server-3', 'server-4']
+            timestamps = [f"{i:02d}:00" for i in range(24)]
+            metrics_matrix = []
+            for _ in hosts:
+                row = []
+                base_value = 70 if metric == 'utilization' else 65 if metric == 'temperature' else 350 if metric == 'power' else 60
+                variation = 40 if metric == 'utilization' else 20 if metric == 'temperature' else 100 if metric == 'power' else 30
+                for _ in timestamps:
+                    row.append(base_value + (time.time() % 100) * variation / 100 - variation / 2)
+                metrics_matrix.append(row)
+        
+        result = {
+            'hosts': hosts,
+            'timestamps': timestamps,
+            'metrics': {
+                metric: metrics_matrix
+            }
+        }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/timeline", methods=['GET'])
+def get_timeline_data():
+    """Get AI workload timeline data"""
+    try:
+        host_filter = request.args.get('host', None)
+        
+        with data_lock:
+            events = list(workload_events)
+        
+        # Filter by host if specified
+        if host_filter and host_filter != 'all':
+            events = [e for e in events if e['host'] == host_filter]
+        
+        # Get unique hosts
+        hosts = list(set(e['host'] for e in events)) if events else [socket.gethostname()]
+        
+        # Generate demo data if no real events
+        if not events:
+            import random
+            models = ['llama3.1:8b', 'qwen2.5:32b', 'deepseek-r1:14b', 'llama3.3:70b']
+            event_types = ['model-load', 'inference', 'gpu-allocation', 'training']
+            statuses = ['running', 'completed', 'failed', 'queued']
+            
+            for i in range(20):
+                start_time = datetime.utcnow().timestamp() - random.randint(0, 7200)  # Last 2 hours
+                duration = random.randint(60, 1800)  # 1-30 minutes
+                
+                events.append({
+                    'id': f"demo-event-{i}",
+                    'content': f"{random.choice(models)} - {random.choice(event_types)}",
+                    'start': datetime.fromtimestamp(start_time).isoformat(),
+                    'end': datetime.fromtimestamp(start_time + duration).isoformat(),
+                    'type': random.choice(event_types),
+                    'host': socket.gethostname(),
+                    'gpu': f"GPU-{random.randint(0, 3)}",
+                    'model': random.choice(models),
+                    'status': random.choice(statuses),
+                    'metadata': {
+                        'tokensPerSecond': random.uniform(20, 100),
+                        'requestCount': random.randint(1, 1000),
+                        'memoryUsage': random.randint(8000, 20000),
+                        'duration': duration
+                    }
+                })
+        
+        return jsonify({
+            'events': events,
+            'hosts': hosts
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# Background thread to collect historical data
+def start_data_collection():
+    def collect_data():
+        while True:
+            collect_historical_data()
+            time.sleep(60)  # Collect every minute
+    
+    thread = threading.Thread(target=collect_data, daemon=True)
+    thread.start()
+
+# Start data collection when app starts
+start_data_collection()
+
+# Simulate some workload events for demo
+def create_demo_events():
+    models = ['llama3.1:8b', 'qwen2.5:32b', 'deepseek-r1:14b']
+    for i, model in enumerate(models):
+        simulate_workload_event('model-load', model, 'completed')
+        time.sleep(0.1)
+        simulate_workload_event('inference', model, 'running' if i == 0 else 'completed')
+
+# Create demo events after a short delay
+threading.Timer(2.0, create_demo_events).start()
 
 if __name__ == "__main__":
     app.run(host=FLASK_HOST, port=FLASK_PORT, debug=FLASK_DEBUG)

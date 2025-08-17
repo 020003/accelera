@@ -63,7 +63,15 @@
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^0.9.9",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "reactflow": "^11.11.4",
+    "d3": "^7.9.0",
+    "plotly.js": "^2.35.2",
+    "react-plotly.js": "^2.6.0",
+    "vis-timeline": "^7.7.3",
+    "vis-data": "^7.1.9",
+    "@types/d3": "^7.4.3",
+    "@types/plotly.js": "^2.33.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
