@@ -481,20 +481,24 @@ def parse_topology_matrix():
         # Get topology matrix from nvidia-smi
         result = run_cmd("nvidia-smi topo -m")
         lines = result.strip().split('\n')
+        print(f"Topology command output:\n{result}")
         
         # Find the matrix start
         matrix_start = -1
         for i, line in enumerate(lines):
-            if 'GPU0' in line and 'GPU1' in line:  # Header line with GPU columns
+            if 'GPU0' in line:  # Header line with GPU columns
                 matrix_start = i
+                print(f"Found matrix start at line {i}: {line}")
                 break
         
         if matrix_start == -1:
+            print("No topology matrix header found")
             return {}
             
         # Parse header to get GPU indices
         header = lines[matrix_start].split()
         gpu_indices = [h for h in header if h.startswith('GPU')]
+        print(f"Found GPU indices: {gpu_indices}")
         
         # Parse matrix data
         topology_matrix = {}
@@ -519,11 +523,15 @@ def parse_topology_matrix():
                         connections[dst_gpu] = connection_type
             
             topology_matrix[src_gpu] = connections
+            print(f"Added {src_gpu} connections: {connections}")
         
+        print(f"Final topology matrix: {topology_matrix}")
         return topology_matrix
         
     except Exception as e:
         print(f"Error parsing topology matrix: {e}")
+        import traceback
+        traceback.print_exc()
         return {}
 
 def get_network_interfaces():
@@ -607,6 +615,7 @@ def detect_gpu_topology():
             'NV4': {'type': 'NVLink4', 'bandwidth': 112, 'description': 'NVLink 4th gen'},
             'NV6': {'type': 'NVLink6', 'bandwidth': 200, 'description': 'NVLink 6th gen'},
             'SYS': {'type': 'PCIe', 'bandwidth': 32, 'description': 'PCIe connection through system'},
+            'NODE': {'type': 'PCIe', 'bandwidth': 24, 'description': 'PCIe connection through NUMA node'},
             'PHB': {'type': 'PCIe', 'bandwidth': 16, 'description': 'PCIe connection through PCIe host bridge'},
             'PIX': {'type': 'PCIe', 'bandwidth': 32, 'description': 'PCIe connection through PCIe switch'},
             'PXB': {'type': 'PCIe', 'bandwidth': 16, 'description': 'PCIe connection through PCIe-to-PCIe bridge'},
