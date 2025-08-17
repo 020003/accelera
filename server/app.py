@@ -638,6 +638,11 @@ def detect_gpu_topology():
             # Get connections from topology matrix
             if gpu_key in topology_matrix:
                 for target_gpu, conn_type in topology_matrix[gpu_key].items():
+                    # Skip invalid targets (like empty "GPU" entries)
+                    if not target_gpu.startswith('GPU') or len(target_gpu) <= 3:
+                        print(f"Skipping invalid GPU target: {target_gpu}")
+                        continue
+                        
                     try:
                         target_idx = int(target_gpu.replace('GPU', ''))
                         
@@ -648,7 +653,8 @@ def detect_gpu_topology():
                             'description': f'Unknown connection type {conn_type}'
                         })
                         
-                        if conn_info['bandwidth'] > 0:  # Skip disabled connections
+                        # Include NODE connections but skip X (disabled) connections
+                        if conn_type != 'X' and conn_info['bandwidth'] > 0:
                             connections.append({
                                 'target': f"gpu-{target_idx}",
                                 'type': conn_info['type'],

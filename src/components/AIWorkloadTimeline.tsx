@@ -118,6 +118,8 @@ export function AIWorkloadTimeline({ data }: { data?: TimelineData }) {
   useEffect(() => {
     if (!timelineRef.current || !timelineData) return;
     
+    try {
+    
     // Filter events by selected host
     const filteredEvents = selectedHost === 'all' 
       ? timelineData.events 
@@ -219,6 +221,10 @@ export function AIWorkloadTimeline({ data }: { data?: TimelineData }) {
         timelineInstance.current = null;
       }
     };
+    
+    } catch (error) {
+      console.error('Error rendering timeline:', error);
+    }
   }, [timelineData, selectedHost]);
   
   const getEventStats = () => {
@@ -238,8 +244,8 @@ export function AIWorkloadTimeline({ data }: { data?: TimelineData }) {
   
   const stats = getEventStats();
   
-  // Show empty state when no data
-  if (!data && !timelineData) {
+  // Show loading state first
+  if (!timelineData) {
     return (
       <Card className="w-full">
         <CardHeader>
@@ -251,11 +257,8 @@ export function AIWorkloadTimeline({ data }: { data?: TimelineData }) {
         <CardContent>
           <div className="h-[400px] w-full flex items-center justify-center">
             <div className="text-center">
-              <div className="text-2xl mb-2">⏰</div>
-              <div className="text-lg font-medium mb-2">No AI workload data available</div>
-              <div className="text-sm text-muted-foreground">
-                Timeline events will appear here when AI models are running
-              </div>
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+              <div className="text-lg font-medium mb-2">Loading timeline data...</div>
             </div>
           </div>
         </CardContent>
