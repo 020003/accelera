@@ -437,12 +437,20 @@ def collect_historical_data():
     """Collect historical data for heatmap visualization"""
     try:
         gpus = get_gpus()
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = datetime.utcnow().strftime('%H:%M')
         hostname = socket.gethostname()
         
         with data_lock:
-            for gpu in gpus:
-                key = f"{hostname}:gpu-{gpu['id']}"
+            for i, gpu in enumerate(gpus):
+                key = f"{hostname}:gpu-{i}"
+                
+                # Initialize deques if they don't exist
+                for metric in ['utilization', 'temperature', 'power', 'memory']:
+                    metric_key = f"{key}:{metric}"
+                    if metric_key not in historical_data:
+                        historical_data[metric_key] = deque(maxlen=1440)  # 24 hours of minutes
+                
+                # Add data points
                 historical_data[f"{key}:utilization"].append({
                     'timestamp': timestamp,
                     'value': gpu['utilization']
@@ -459,98 +467,210 @@ def collect_historical_data():
                     'timestamp': timestamp,
                     'value': (gpu['memory']['used'] / gpu['memory']['total']) * 100
                 })
+                
+        print(f"Collected historical data for {len(gpus)} GPUs at {timestamp}")
+        
     except Exception as e:
         print(f"Error collecting historical data: {e}")
+        import traceback
+        traceback.print_exc()
+
+def parse_topology_matrix():
+    """Parse nvidia-smi topo -m output to get real interconnection data"""
+    try:
+        # Get topology matrix from nvidia-smi
+        result = run_cmd("nvidia-smi topo -m")
+        lines = result.strip().split('\n')
+        
+        # Find the matrix start
+        matrix_start = -1
+        for i, line in enumerate(lines):
+            if 'GPU0' in line and 'GPU1' in line:  # Header line with GPU columns
+                matrix_start = i
+                break
+        
+        if matrix_start == -1:
+            return {}
+            
+        # Parse header to get GPU indices
+        header = lines[matrix_start].split()
+        gpu_indices = [h for h in header if h.startswith('GPU')]
+        
+        # Parse matrix data
+        topology_matrix = {}
+        for i in range(matrix_start + 1, len(lines)):
+            line = lines[i].strip()
+            if not line or line.startswith('Legend'):
+                break
+                
+            parts = line.split()
+            if len(parts) < len(gpu_indices) + 1:
+                continue
+                
+            src_gpu = parts[0]
+            if not src_gpu.startswith('GPU'):
+                continue
+                
+            connections = {}
+            for j, dst_gpu in enumerate(gpu_indices):
+                if j + 1 < len(parts):
+                    connection_type = parts[j + 1]
+                    if src_gpu != dst_gpu:  # Don't include self-connections
+                        connections[dst_gpu] = connection_type
+            
+            topology_matrix[src_gpu] = connections
+        
+        return topology_matrix
+        
+    except Exception as e:
+        print(f"Error parsing topology matrix: {e}")
+        return {}
+
+def get_network_interfaces():
+    """Get network interface information including Mellanox NICs"""
+    try:
+        # Get network interfaces
+        result = run_cmd("ip addr show")
+        interfaces = []
+        
+        current_interface = None
+        for line in result.split('\n'):
+            line = line.strip()
+            
+            # New interface
+            if line and line[0].isdigit() and ':' in line:
+                if current_interface:
+                    interfaces.append(current_interface)
+                
+                parts = line.split(': ')
+                if len(parts) >= 2:
+                    current_interface = {
+                        'name': parts[1].split('@')[0],
+                        'state': 'UP' if 'UP' in line else 'DOWN',
+                        'addresses': [],
+                        'type': 'unknown'
+                    }
+            
+            # IP address
+            elif current_interface and line.startswith('inet '):
+                ip = line.split()[1].split('/')[0]
+                current_interface['addresses'].append(ip)
+        
+        if current_interface:
+            interfaces.append(current_interface)
+        
+        # Try to identify Mellanox interfaces
+        try:
+            lspci_result = run_cmd("lspci | grep -i mellanox")
+            mellanox_devices = lspci_result.strip().split('\n') if lspci_result.strip() else []
+            
+            # Try to get interface types from ethtool
+            for interface in interfaces:
+                if interface['name'] != 'lo':
+                    try:
+                        ethtool_result = run_cmd(f"ethtool {interface['name']} 2>/dev/null | grep -E 'Speed|Duplex'")
+                        if 'mellanox' in ethtool_result.lower() or any('mellanox' in device.lower() for device in mellanox_devices):
+                            interface['type'] = 'mellanox'
+                        elif 'ib' in interface['name'] or 'infiniband' in interface['name']:
+                            interface['type'] = 'infiniband'
+                        elif 'eth' in interface['name'] or 'ens' in interface['name']:
+                            interface['type'] = 'ethernet'
+                    except:
+                        pass
+        except:
+            pass
+        
+        return [iface for iface in interfaces if iface['name'] != 'lo' and iface['addresses']]
+        
+    except Exception as e:
+        print(f"Error getting network interfaces: {e}")
+        return []
 
 def detect_gpu_topology():
-    """Detect GPU topology and interconnections"""
+    """Detect GPU topology and interconnections using nvidia-smi topo -m"""
     try:
         # Get basic GPU info
         gpus = get_gpus()
         hostname = socket.gethostname()
         
-        # Try to get topology info using nvidia-ml-py
-        try:
-            import pynvml
-            pynvml.nvmlInit()
+        # Get real topology matrix
+        topology_matrix = parse_topology_matrix()
+        
+        # Get network interfaces for multi-host connectivity
+        network_interfaces = get_network_interfaces()
+        
+        # Map connection types to bandwidth and human-readable names
+        connection_map = {
+            'NV1': {'type': 'NVLink1', 'bandwidth': 25, 'description': 'NVLink 1st gen'},
+            'NV2': {'type': 'NVLink2', 'bandwidth': 50, 'description': 'NVLink 2nd gen'},
+            'NV3': {'type': 'NVLink3', 'bandwidth': 100, 'description': 'NVLink 3rd gen'},
+            'NV4': {'type': 'NVLink4', 'bandwidth': 112, 'description': 'NVLink 4th gen'},
+            'NV6': {'type': 'NVLink6', 'bandwidth': 200, 'description': 'NVLink 6th gen'},
+            'SYS': {'type': 'PCIe', 'bandwidth': 32, 'description': 'PCIe connection through system'},
+            'PHB': {'type': 'PCIe', 'bandwidth': 16, 'description': 'PCIe connection through PCIe host bridge'},
+            'PIX': {'type': 'PCIe', 'bandwidth': 32, 'description': 'PCIe connection through PCIe switch'},
+            'PXB': {'type': 'PCIe', 'bandwidth': 16, 'description': 'PCIe connection through PCIe-to-PCIe bridge'},
+            'SOC': {'type': 'SoC', 'bandwidth': 200, 'description': 'SoC interconnect'},
+            'X': {'type': 'Disabled', 'bandwidth': 0, 'description': 'Connection disabled or not available'}
+        }
+        
+        topology_gpus = []
+        for i, gpu in enumerate(gpus):
+            connections = []
+            gpu_key = f"GPU{i}"
             
-            topology_gpus = []
-            for i, gpu in enumerate(gpus):
-                gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-                connections = []
-                
-                # Check connections to other GPUs
-                for j, other_gpu in enumerate(gpus):
-                    if i != j:
-                        try:
-                            other_handle = pynvml.nvmlDeviceGetHandleByIndex(j)
-                            # Try to get P2P capability
-                            p2p_status = pynvml.nvmlDeviceGetP2PStatus(gpu_handle, other_handle, pynvml.NVML_P2P_CAPS_INDEX_READ)
-                            if p2p_status == pynvml.NVML_P2P_STATUS_OK:
-                                # Assume NVLink for P2P capable GPUs
-                                connections.append({
-                                    'target': f"gpu-{j}",
-                                    'type': 'NVLink',
-                                    'bandwidth': 600  # Estimated NVLink bandwidth
-                                })
-                            else:
-                                # Fallback to PCIe
-                                connections.append({
-                                    'target': f"gpu-{j}",
-                                    'type': 'PCIe',
-                                    'bandwidth': 32  # PCIe 4.0 x16
-                                })
-                        except:
-                            # Fallback connection
-                            connections.append({
-                                'target': f"gpu-{j}",
-                                'type': 'PCIe',
-                                'bandwidth': 32
-                            })
-                
-                topology_gpus.append({
-                    'id': f"gpu-{i}",
-                    'name': gpu['name'],
-                    'host': hostname,
-                    'utilization': gpu['utilization'],
-                    'memory': gpu['memory'],
-                    'temperature': gpu['temperature'],
-                    'power': gpu['power'],
-                    'connections': connections
-                })
-            
-            return {'gpus': topology_gpus}
-            
-        except ImportError:
-            # Fallback topology without pynvml
-            topology_gpus = []
-            for i, gpu in enumerate(gpus):
-                connections = []
-                # Create basic mesh topology
-                for j in range(len(gpus)):
-                    if i != j:
+            # Get connections from topology matrix
+            if gpu_key in topology_matrix:
+                for target_gpu, conn_type in topology_matrix[gpu_key].items():
+                    target_idx = int(target_gpu.replace('GPU', ''))
+                    
+                    # Map connection type
+                    conn_info = connection_map.get(conn_type, {
+                        'type': conn_type,
+                        'bandwidth': 32,
+                        'description': f'Unknown connection type {conn_type}'
+                    })
+                    
+                    if conn_info['bandwidth'] > 0:  # Skip disabled connections
                         connections.append({
-                            'target': f"gpu-{j}",
-                            'type': 'PCIe',
-                            'bandwidth': 32
+                            'target': f"gpu-{target_idx}",
+                            'type': conn_info['type'],
+                            'bandwidth': conn_info['bandwidth'],
+                            'description': conn_info['description'],
+                            'raw_type': conn_type
                         })
-                
-                topology_gpus.append({
-                    'id': f"gpu-{i}",
-                    'name': gpu['name'],
-                    'host': hostname,
-                    'utilization': gpu['utilization'],
-                    'memory': gpu['memory'],
-                    'temperature': gpu['temperature'],
-                    'power': gpu['power'],
-                    'connections': connections
-                })
             
-            return {'gpus': topology_gpus}
+            # Add GPU with enhanced information
+            gpu_info = {
+                'id': f"gpu-{i}",
+                'name': gpu['name'],
+                'host': hostname,
+                'utilization': gpu['utilization'],
+                'memory': gpu['memory'],
+                'temperature': gpu['temperature'],
+                'power': gpu['power'],
+                'connections': connections,
+                'pci_info': gpu.get('pci', {}),
+                'uuid': gpu.get('uuid', f"GPU-{i}")
+            }
+            
+            topology_gpus.append(gpu_info)
+        
+        return {
+            'gpus': topology_gpus,
+            'host_info': {
+                'hostname': hostname,
+                'network_interfaces': network_interfaces,
+                'gpu_count': len(gpus)
+            },
+            'topology_matrix': topology_matrix
+        }
             
     except Exception as e:
         print(f"Error detecting topology: {e}")
-        return {'gpus': []}
+        import traceback
+        traceback.print_exc()
+        return {'gpus': [], 'host_info': {}, 'topology_matrix': {}}
 
 def simulate_workload_event(event_type, model_name, status):
     """Simulate AI workload events for timeline"""
