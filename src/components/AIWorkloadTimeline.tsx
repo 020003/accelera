@@ -110,7 +110,8 @@ export function AIWorkloadTimeline({ data }: { data?: TimelineData }) {
   };
   
   useEffect(() => {
-    const workloadData = data || generateDemoData();
+    // Only use demo data if no data is provided at all
+    const workloadData = data || (data === null ? generateDemoData() : null);
     setTimelineData(workloadData);
   }, [data]);
   
@@ -236,6 +237,31 @@ export function AIWorkloadTimeline({ data }: { data?: TimelineData }) {
   };
   
   const stats = getEventStats();
+  
+  // Show empty state when no data
+  if (!data && !timelineData) {
+    return (
+      <Card className="w-full">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Clock className="h-5 w-5" />
+            AI Workload Timeline
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-[400px] w-full flex items-center justify-center">
+            <div className="text-center">
+              <div className="text-2xl mb-2">⏰</div>
+              <div className="text-lg font-medium mb-2">No AI workload data available</div>
+              <div className="text-sm text-muted-foreground">
+                Timeline events will appear here when AI models are running
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
   
   return (
     <Card className="w-full">

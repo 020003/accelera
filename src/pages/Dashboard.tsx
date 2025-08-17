@@ -5,8 +5,13 @@ import { HostManager } from "@/components/HostManager";
 import { MultiHostOverview } from "@/components/MultiHostOverview";
 import { HostTab } from "@/components/HostTab";
 import { PowerUsageChart } from "@/components/PowerUsageChart";
+import { GPUTopologyMap } from "@/components/GPUTopologyMap";
+import { GPU3DHeatmap } from "@/components/GPU3DHeatmap";
+import { AIWorkloadTimeline } from "@/components/AIWorkloadTimeline";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Monitor, BarChart3, Settings, Cog, Bot } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Monitor, BarChart3, Settings, Cog, Bot, TrendingUp, ExternalLink, NetworkIcon, Clock } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -55,6 +60,9 @@ export default function Dashboard() {
   });
   const [hostsData, setHostsData] = useState<HostData[]>([]);
   const [activeTab, setActiveTab] = useState("overview");
+  const [topologyData, setTopologyData] = useState(null);
+  const [heatmapData, setHeatmapData] = useState(null);
+  const [timelineData, setTimelineData] = useState(null);
   
   // Create a Map for the PowerUsageChart
   const hostDataMap = new Map(
@@ -69,6 +77,104 @@ export default function Dashboard() {
     refetchIntervalMs: demo ? refreshInterval : 0
   });
 
+
+  // Helper function to fetch advanced visualization data from GPU hosts
+  const fetchAdvancedVisualizationData = async () => {
+    if (hosts.length === 0) return;
+
+    try {
+      // Fetch topology data from all hosts
+      const topologyPromises = hosts.map(async (host) => {
+        try {
+          const url = new URL(host.url);
+          const baseUrl = `${url.protocol}//${url.host}`;
+          const response = await fetch(`${baseUrl}/api/topology`);
+          if (response.ok) {
+            const data = await response.json();
+            return { host: host.name, ...data };
+          }
+        } catch (error) {
+          console.error(`Error fetching topology from ${host.name}:`, error);
+        }
+        return null;
+      });
+
+      // Fetch heatmap data from all hosts
+      const heatmapPromises = hosts.map(async (host) => {
+        try {
+          const url = new URL(host.url);
+          const baseUrl = `${url.protocol}//${url.host}`;
+          const response = await fetch(`${baseUrl}/api/heatmap?metric=utilization&hours=24`);
+          if (response.ok) {
+            const data = await response.json();
+            return { host: host.name, ...data };
+          }
+        } catch (error) {
+          console.error(`Error fetching heatmap from ${host.name}:`, error);
+        }
+        return null;
+      });
+
+      // Fetch timeline data from all hosts
+      const timelinePromises = hosts.map(async (host) => {
+        try {
+          const url = new URL(host.url);
+          const baseUrl = `${url.protocol}//${url.host}`;
+          const response = await fetch(`${baseUrl}/api/timeline`);
+          if (response.ok) {
+            const data = await response.json();
+            return { host: host.name, ...data };
+          }
+        } catch (error) {
+          console.error(`Error fetching timeline from ${host.name}:`, error);
+        }
+        return null;
+      });
+
+      const [topologyResults, heatmapResults, timelineResults] = await Promise.all([
+        Promise.all(topologyPromises),
+        Promise.all(heatmapPromises),
+        Promise.all(timelinePromises)
+      ]);
+
+      // Combine topology data from all hosts
+      const allTopologyGpus = topologyResults
+        .filter(result => result && result.gpus)
+        .flatMap(result => result.gpus.map(gpu => ({ ...gpu, host: result.host })));
+
+      if (allTopologyGpus.length > 0) {
+        setTopologyData({ gpus: allTopologyGpus });
+      }
+
+      // Combine heatmap data from all hosts
+      const validHeatmapResults = heatmapResults.filter(result => result && result.hosts);
+      if (validHeatmapResults.length > 0) {
+        const combinedHeatmap = {
+          hosts: validHeatmapResults.flatMap(result => result.hosts),
+          timestamps: validHeatmapResults[0].timestamps, // Use first host's timestamps
+          metrics: {
+            utilization: validHeatmapResults.flatMap(result => result.metrics.utilization),
+            temperature: validHeatmapResults.flatMap(result => result.metrics.temperature),
+            power: validHeatmapResults.flatMap(result => result.metrics.power),
+            memory: validHeatmapResults.flatMap(result => result.metrics.memory)
+          }
+        };
+        setHeatmapData(combinedHeatmap);
+      }
+
+      // Combine timeline data from all hosts
+      const validTimelineResults = timelineResults.filter(result => result && result.events);
+      if (validTimelineResults.length > 0) {
+        const combinedTimeline = {
+          events: validTimelineResults.flatMap(result => result.events)
+        };
+        setTimelineData(combinedTimeline);
+      }
+
+    } catch (error) {
+      console.error('Error fetching advanced visualization data:', error);
+    }
+  };
 
   // Helper function to check if Ollama is available on a host
   const checkOllamaAvailability = async (hostUrl: string) => {
@@ -169,6 +275,9 @@ export default function Dashboard() {
 
     const results = await Promise.all(hosts.map(fetchHostData));
     setHostsData(results);
+    
+    // Fetch advanced visualization data
+    await fetchAdvancedVisualizationData();
     
     // Update host connection status without overwriting hosts state
     // This prevents the glitch where newly added hosts disappear
@@ -276,6 +385,7 @@ export default function Dashboard() {
                 }`} />
                 {(connectedHosts.length > 0 || hostsWithOllama > 0) ? "Online" : "Offline"}
               </div>
+              
             </div>
           </div>
         </div>
@@ -289,6 +399,10 @@ export default function Dashboard() {
             <TabsTrigger value="overview" className="flex items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               Overview
+            </TabsTrigger>
+            <TabsTrigger value="visualizations" className="flex items-center gap-2">
+              <TrendingUp className="h-4 w-4" />
+              Advanced Visualizations
             </TabsTrigger>
             {hostsData.map((host) => (
               <TabsTrigger key={host.url} value={host.url} className="flex items-center gap-2">
@@ -314,6 +428,38 @@ export default function Dashboard() {
               refreshInterval={refreshInterval}
               energyRate={energyRate}
             />
+          </TabsContent>
+
+          {/* Advanced Visualizations Tab */}
+          <TabsContent value="visualizations" className="space-y-6">
+            <Tabs defaultValue="topology" className="space-y-4">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="topology" className="flex items-center gap-2">
+                  <NetworkIcon className="h-4 w-4" />
+                  GPU Topology
+                </TabsTrigger>
+                <TabsTrigger value="heatmap" className="flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4" />
+                  3D Heatmap
+                </TabsTrigger>
+                <TabsTrigger value="timeline" className="flex items-center gap-2">
+                  <Clock className="h-4 w-4" />
+                  AI Timeline
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="topology">
+                <GPUTopologyMap data={topologyData} />
+              </TabsContent>
+
+              <TabsContent value="heatmap">
+                <GPU3DHeatmap data={heatmapData} />
+              </TabsContent>
+
+              <TabsContent value="timeline">
+                <AIWorkloadTimeline data={timelineData} />
+              </TabsContent>
+            </Tabs>
           </TabsContent>
 
           {/* Individual Host Tabs */}

@@ -3,10 +3,12 @@ import { Helmet } from 'react-helmet-async';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { GPUTopologyMap } from '@/components/GPUTopologyMap';
 import { GPU3DHeatmap } from '@/components/GPU3DHeatmap';
 import { AIWorkloadTimeline } from '@/components/AIWorkloadTimeline';
-import { NetworkIcon, BarChart3, Clock, TrendingUp, Cpu, Bot } from 'lucide-react';
+import { NetworkIcon, BarChart3, Clock, TrendingUp, Cpu, Bot, ArrowLeft } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 
 export default function AdvancedVisualizations() {
@@ -101,6 +103,12 @@ export default function AdvancedVisualizations() {
             </div>
             
             <div className="flex items-center gap-2">
+              <Link to="/">
+                <Button variant="outline" size="sm" className="flex items-center gap-2">
+                  <ArrowLeft className="h-4 w-4" />
+                  Back to Dashboard
+                </Button>
+              </Link>
               <Badge variant="outline" className="flex items-center gap-1">
                 <Cpu className="h-3 w-3" />
                 Multi-Host Analysis

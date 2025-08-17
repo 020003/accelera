@@ -81,7 +81,10 @@ export function GPU3DHeatmap({ data }: { data?: HeatmapData }) {
   };
   
   useEffect(() => {
-    const heatmapData = data || generateDemoData();
+    // Only use demo data if no data is provided
+    const heatmapData = data || (data === null ? generateDemoData() : null);
+    if (!heatmapData) return;
+    
     const config = metricConfig[selectedMetric];
     
     // Create 3D surface plot data
@@ -165,6 +168,31 @@ export function GPU3DHeatmap({ data }: { data?: HeatmapData }) {
     responsive: true,
   };
   
+  // Show empty state when no data
+  if (!data && plotData.length === 0) {
+    return (
+      <Card className="w-full">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <BarChart3 className="h-5 w-5" />
+            3D GPU Cluster Heatmap
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-[600px] w-full flex items-center justify-center">
+            <div className="text-center">
+              <div className="text-2xl mb-2">📊</div>
+              <div className="text-lg font-medium mb-2">No heatmap data available</div>
+              <div className="text-sm text-muted-foreground">
+                Historical GPU metrics will appear here once data is collected
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="w-full">
       <CardHeader>

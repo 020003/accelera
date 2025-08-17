@@ -183,71 +183,30 @@ export function GPUTopologyMap({ data }: { data?: GPUTopologyData }) {
     [setEdges],
   );
   
-  // Demo data if no real data provided
-  useEffect(() => {
-    if (!data) {
-      const demoData: GPUTopologyData = {
-        gpus: [
-          {
-            id: 'gpu-0',
-            name: 'RTX 4090 #0',
-            host: 'server-1',
-            utilization: 85,
-            memory: { used: 20000, total: 24576 },
-            temperature: 72,
-            power: { draw: 380, limit: 450 },
-            connections: [
-              { target: 'gpu-1', type: 'NVLink', bandwidth: 600 },
-              { target: 'gpu-2', type: 'PCIe', bandwidth: 32 },
-            ],
-          },
-          {
-            id: 'gpu-1',
-            name: 'RTX 4090 #1',
-            host: 'server-1',
-            utilization: 62,
-            memory: { used: 15000, total: 24576 },
-            temperature: 68,
-            power: { draw: 320, limit: 450 },
-            connections: [
-              { target: 'gpu-0', type: 'NVLink', bandwidth: 600 },
-              { target: 'gpu-3', type: 'PCIe', bandwidth: 32 },
-            ],
-          },
-          {
-            id: 'gpu-2',
-            name: 'A100 #0',
-            host: 'server-2',
-            utilization: 95,
-            memory: { used: 38000, total: 40960 },
-            temperature: 78,
-            power: { draw: 380, limit: 400 },
-            connections: [
-              { target: 'gpu-3', type: 'SXM', bandwidth: 900 },
-              { target: 'gpu-0', type: 'PCIe', bandwidth: 32 },
-            ],
-          },
-          {
-            id: 'gpu-3',
-            name: 'A100 #1',
-            host: 'server-2',
-            utilization: 91,
-            memory: { used: 36000, total: 40960 },
-            temperature: 76,
-            power: { draw: 370, limit: 400 },
-            connections: [
-              { target: 'gpu-2', type: 'SXM', bandwidth: 900 },
-              { target: 'gpu-1', type: 'PCIe', bandwidth: 32 },
-            ],
-          },
-        ],
-      };
-      
-      // Trigger update with demo data
-      const event = new CustomEvent('topologyData', { detail: demoData });
-      window.dispatchEvent(event);
-    }
-  }, [data]);
+  // Show loading or empty state when no data
+  if (!data || !data.gpus || data.gpus.length === 0) {
+    return (
+      <Card className="w-full">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Cpu className="h-5 w-5" />
+            GPU Topology Map
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-[600px] w-full flex items-center justify-center">
+            <div className="text-center">
+              <div className="text-2xl mb-2">🔍</div>
+              <div className="text-lg font-medium mb-2">No GPU topology data available</div>
+              <div className="text-sm text-muted-foreground">
+                Add GPU hosts in Settings to view topology information
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
   
   return (
     <Card className="w-full">
