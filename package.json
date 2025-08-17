@@ -1,7 +1,27 @@
 {
-  "name": "vite_react_shadcn_ts",
-  "private": true,
-  "version": "0.0.0",
+  "name": "accelera",
+  "description": "High-Performance GPU Acceleration Platform for AI/ML workloads",
+  "version": "2.0.0",
+  "homepage": "https://github.com/your-org/accelera",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/accelera.git"
+  },
+  "keywords": [
+    "gpu-monitoring",
+    "ai-workload-management",
+    "machine-learning",
+    "nvidia",
+    "ollama",
+    "hpc",
+    "gpu-cluster",
+    "real-time-monitoring",
+    "react",
+    "typescript"
+  ],
+  "author": "Accelera Platform",
+  "license": "AGPL-3.0",
+  "private": false,
   "type": "module",
   "scripts": {
     "dev": "vite",

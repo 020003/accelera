@@ -234,8 +234,8 @@ const lastAlertRef = useRef<Record<string, number>>({});
     return count ? Math.round(gpus.reduce((s, g) => s + (g.temperature || 0), 0) / count) : 0;
   }, [hosts, demo, hostTempSums, hostGpuCounts, gpus]);
 
-  const pageTitle = "NVIDIA SMI Dashboard";
-  const description = "Monitor NVIDIA GPU utilization, memory, temperature and power in a modern dashboard.";
+  const pageTitle = "Accelera - GPU Acceleration Platform";
+  const description = "Professional GPU acceleration platform with AI workload management and real-time monitoring.";
 
   return (
     <div className="min-h-screen app-bg">
@@ -254,14 +254,21 @@ const lastAlertRef = useRef<Record<string, number>>({});
           </div>
           
           <div className="relative z-10">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="status-indicator active" />
-              <h1 className="text-4xl md:text-5xl font-bold tracking-tight bg-gradient-to-r from-brand via-accent-gpu to-brand-2 bg-clip-text text-transparent animate-gradient-shift">
-                GPU Monitor
-              </h1>
+            <div className="flex items-center gap-4 mb-2">
+              <img 
+                src="/logo.png" 
+                alt="Accelera" 
+                className="h-16 w-auto"
+              />
+              <div className="flex items-center gap-3">
+                <div className="status-indicator active" />
+                <h1 className="text-4xl md:text-5xl font-bold tracking-tight bg-gradient-to-r from-brand via-accent-gpu to-brand-2 bg-clip-text text-transparent animate-gradient-shift">
+                  Accelera
+                </h1>
+              </div>
             </div>
             <p className="text-muted-foreground mt-2 max-w-3xl text-lg leading-relaxed">
-              Real-time NVIDIA GPU performance monitoring with AI-powered insights and advanced analytics
+              High-Performance GPU Acceleration Platform with AI workload management and advanced analytics
             </p>
             
             {/* Status indicators */}
@@ -596,7 +603,7 @@ const lastAlertRef = useRef<Record<string, number>>({});
               </span>
             )}
             <span className="text-xs opacity-70">
-              GPU Monitor v2.0
+              Accelera v2.0
             </span>
           </div>
         </div>

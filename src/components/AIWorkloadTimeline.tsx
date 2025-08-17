@@ -32,32 +32,32 @@ interface TimelineData {
 
 const eventTypeConfig = {
   'model-load': {
-    color: '#3b82f6',
+    color: '#0078FF', // Accelera Blue
     icon: '📚',
     label: 'Model Loading',
   },
   'inference': {
-    color: '#10b981',
+    color: '#00FF88', // Accelera Green
     icon: '🧠',
     label: 'Inference',
   },
   'gpu-allocation': {
-    color: '#f59e0b',
+    color: '#9A4DFF', // Accelera Violet
     icon: '⚡',
     label: 'GPU Allocation',
   },
   'training': {
-    color: '#8b5cf6',
+    color: '#0078FF', // Accelera Blue
     icon: '🎓',
     label: 'Training',
   },
 };
 
 const statusConfig = {
-  running: { color: '#10b981', icon: Play },
+  running: { color: '#00FF88', icon: Play }, // Accelera Green
   completed: { color: '#6b7280', icon: Square },
   failed: { color: '#ef4444', icon: Square },
-  queued: { color: '#f59e0b', icon: Pause },
+  queued: { color: '#9A4DFF', icon: Pause }, // Accelera Violet
 };
 
 export function AIWorkloadTimeline({ data }: { data?: TimelineData }) {
@@ -111,8 +111,20 @@ export function AIWorkloadTimeline({ data }: { data?: TimelineData }) {
   
   useEffect(() => {
     // Only use demo data if no data is provided at all
-    const workloadData = data || (data === null ? generateDemoData() : null);
-    setTimelineData(workloadData);
+    if (data === undefined) {
+      // Still loading
+      setTimelineData(null);
+    } else if (data === null) {
+      // Generate demo data
+      setTimelineData(generateDemoData());
+    } else {
+      // Use provided data, ensure hosts array exists
+      const workloadData = {
+        ...data,
+        hosts: data.hosts || [...new Set(data.events?.map(e => e.host) || [])]
+      };
+      setTimelineData(workloadData);
+    }
   }, [data]);
   
   useEffect(() => {
@@ -282,11 +294,11 @@ export function AIWorkloadTimeline({ data }: { data?: TimelineData }) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Hosts</SelectItem>
-                {timelineData?.hosts.map(host => (
+                {timelineData?.hosts?.map(host => (
                   <SelectItem key={host} value={host}>
                     {host}
                   </SelectItem>
-                ))}
+                )) || []}
               </SelectContent>
             </Select>
           </div>
@@ -351,19 +363,19 @@ export function AIWorkloadTimeline({ data }: { data?: TimelineData }) {
         }
         
         .vis-item.timeline-model-load {
-          background: linear-gradient(45deg, #3b82f6, #60a5fa) !important;
+          background: linear-gradient(45deg, #0078FF, #4DA6FF) !important;
         }
         
         .vis-item.timeline-inference {
-          background: linear-gradient(45deg, #10b981, #34d399) !important;
+          background: linear-gradient(45deg, #00FF88, #4DFFAA) !important;
         }
         
         .vis-item.timeline-gpu-allocation {
-          background: linear-gradient(45deg, #f59e0b, #fbbf24) !important;
+          background: linear-gradient(45deg, #9A4DFF, #B574FF) !important;
         }
         
         .vis-item.timeline-training {
-          background: linear-gradient(45deg, #8b5cf6, #a78bfa) !important;
+          background: linear-gradient(45deg, #0078FF, #4DA6FF) !important;
         }
         
         @keyframes pulse {

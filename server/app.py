@@ -431,7 +431,12 @@ def discover_ollama():
 @app.route("/api/health", methods=['GET'])
 def health():
     """Health check endpoint"""
-    return jsonify({"status": "ok", "timestamp": datetime.utcnow().isoformat() + "Z"})
+    return jsonify({
+        "status": "ok", 
+        "platform": "Accelera",
+        "version": "2.0",
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    })
 
 def collect_historical_data():
     """Collect historical data for heatmap visualization"""
@@ -478,10 +483,15 @@ def collect_historical_data():
 def parse_topology_matrix():
     """Parse nvidia-smi topo -m output to get real interconnection data"""
     try:
-        # Get topology matrix from nvidia-smi
+        # Get topology matrix from nvidia-smi (strip color codes)
         result = run_cmd("nvidia-smi topo -m")
+        
+        # Strip ANSI color codes
+        import re
+        result = re.sub(r'\x1b\[[0-9;]*m', '', result)
+        
         lines = result.strip().split('\n')
-        print(f"Topology command output:\n{result}")
+        print(f"Topology command output (cleaned):\n{result}")
         
         # Find the matrix start
         matrix_start = -1
@@ -495,32 +505,43 @@ def parse_topology_matrix():
             print("No topology matrix header found")
             return {}
             
-        # Parse header to get GPU indices
-        header = lines[matrix_start].split()
-        gpu_indices = [h for h in header if h.startswith('GPU')]
-        print(f"Found GPU indices: {gpu_indices}")
+        # Parse header to get GPU indices from the full line
+        header_line = lines[matrix_start]
+        print(f"Raw header line: '{header_line}'")
+        header_parts = header_line.split()
+        
+        # Find all GPU column indices
+        gpu_columns = []
+        for i, part in enumerate(header_parts):
+            if part.startswith('GPU') and len(part) > 3:  # GPU0, GPU1, etc.
+                gpu_columns.append((i, part))
+        print(f"Found GPU columns: {gpu_columns}")
         
         # Parse matrix data
         topology_matrix = {}
         for i in range(matrix_start + 1, len(lines)):
             line = lines[i].strip()
-            if not line or line.startswith('Legend'):
+            if not line or line.startswith('Legend') or line.startswith('NIC'):
                 break
                 
             parts = line.split()
-            if len(parts) < len(gpu_indices) + 1:
+            if len(parts) < 2:
                 continue
                 
             src_gpu = parts[0]
-            if not src_gpu.startswith('GPU'):
+            if not src_gpu.startswith('GPU') or len(src_gpu) <= 3:
                 continue
                 
+            print(f"Processing {src_gpu}: {parts}")
+            
             connections = {}
-            for j, dst_gpu in enumerate(gpu_indices):
-                if j + 1 < len(parts):
-                    connection_type = parts[j + 1]
-                    if src_gpu != dst_gpu:  # Don't include self-connections
+            # Map each GPU column to its connection type
+            for col_idx, dst_gpu in gpu_columns:
+                if col_idx < len(parts):
+                    connection_type = parts[col_idx]
+                    if src_gpu != dst_gpu and connection_type != 'X':  # Don't include self-connections or disabled
                         connections[dst_gpu] = connection_type
+                        print(f"  Found connection: {src_gpu} -> {dst_gpu} via {connection_type}")
             
             topology_matrix[src_gpu] = connections
             print(f"Added {src_gpu} connections: {connections}")

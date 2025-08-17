@@ -1,13 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNvidiaSmi } from "@/hooks/useNvidiaSmi";
 import { HostManager } from "@/components/HostManager";
 import { MultiHostOverview } from "@/components/MultiHostOverview";
 import { HostTab } from "@/components/HostTab";
 import { PowerUsageChart } from "@/components/PowerUsageChart";
-import { GPUTopologyMap } from "@/components/GPUTopologyMap";
-import { GPU3DHeatmap } from "@/components/GPU3DHeatmap";
-import { AIWorkloadTimeline } from "@/components/AIWorkloadTimeline";
+
+// Lazy load heavy visualization components
+const GPUTopologyMap = lazy(() => import("@/components/GPUTopologyMap").then(m => ({ default: m.GPUTopologyMap })));
+const GPU3DHeatmap = lazy(() => import("@/components/GPU3DHeatmap").then(m => ({ default: m.GPU3DHeatmap })));
+const AIWorkloadTimeline = lazy(() => import("@/components/AIWorkloadTimeline").then(m => ({ default: m.AIWorkloadTimeline })));
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Monitor, BarChart3, Settings, Cog, Bot, TrendingUp, ExternalLink, NetworkIcon, Clock } from "lucide-react";
@@ -63,6 +65,7 @@ export default function Dashboard() {
   const [topologyData, setTopologyData] = useState(null);
   const [heatmapData, setHeatmapData] = useState(null);
   const [timelineData, setTimelineData] = useState(null);
+  const [advancedDataLoaded, setAdvancedDataLoaded] = useState(false);
   
   // Create a Map for the PowerUsageChart
   const hostDataMap = new Map(
@@ -78,98 +81,86 @@ export default function Dashboard() {
   });
 
 
-  // Helper function to fetch advanced visualization data from GPU hosts
+  // Helper function to fetch advanced visualization data from GPU hosts (lazy-loaded)
   const fetchAdvancedVisualizationData = async () => {
-    if (hosts.length === 0) return;
+    if (hosts.length === 0 || advancedDataLoaded) return;
 
     try {
-      // Fetch topology data from all hosts
-      const topologyPromises = hosts.map(async (host) => {
+      // Create timeout signal for faster failure
+      const timeoutController = new AbortController();
+      const timeoutId = setTimeout(() => timeoutController.abort(), 5000); // 5 second timeout
+
+      // Fetch all data types from all hosts in parallel with timeout
+      const hostPromises = hosts.map(async (host) => {
         try {
           const url = new URL(host.url);
           const baseUrl = `${url.protocol}//${url.host}`;
-          const response = await fetch(`${baseUrl}/api/topology`);
-          if (response.ok) {
-            const data = await response.json();
-            return { host: host.name, ...data };
+          
+          // Fetch all APIs for this host in parallel
+          const [topologyResponse, heatmapResponse, timelineResponse] = await Promise.allSettled([
+            fetch(`${baseUrl}/api/topology`, { signal: timeoutController.signal }),
+            fetch(`${baseUrl}/api/heatmap?metric=utilization&hours=2`, { signal: timeoutController.signal }), // Reduced hours for faster loading
+            fetch(`${baseUrl}/api/timeline`, { signal: timeoutController.signal })
+          ]);
+
+          const results = { host: host.name, topology: null, heatmap: null, timeline: null };
+
+          if (topologyResponse.status === 'fulfilled' && topologyResponse.value.ok) {
+            results.topology = await topologyResponse.value.json();
           }
+          if (heatmapResponse.status === 'fulfilled' && heatmapResponse.value.ok) {
+            results.heatmap = await heatmapResponse.value.json();
+          }
+          if (timelineResponse.status === 'fulfilled' && timelineResponse.value.ok) {
+            results.timeline = await timelineResponse.value.json();
+          }
+
+          return results;
         } catch (error) {
-          console.error(`Error fetching topology from ${host.name}:`, error);
+          console.error(`Error fetching data from ${host.name}:`, error);
+          return { host: host.name, topology: null, heatmap: null, timeline: null };
         }
-        return null;
       });
 
-      // Fetch heatmap data from all hosts
-      const heatmapPromises = hosts.map(async (host) => {
-        try {
-          const url = new URL(host.url);
-          const baseUrl = `${url.protocol}//${url.host}`;
-          const response = await fetch(`${baseUrl}/api/heatmap?metric=utilization&hours=24`);
-          if (response.ok) {
-            const data = await response.json();
-            return { host: host.name, ...data };
-          }
-        } catch (error) {
-          console.error(`Error fetching heatmap from ${host.name}:`, error);
-        }
-        return null;
-      });
+      const hostResults = await Promise.all(hostPromises);
+      clearTimeout(timeoutId);
 
-      // Fetch timeline data from all hosts
-      const timelinePromises = hosts.map(async (host) => {
-        try {
-          const url = new URL(host.url);
-          const baseUrl = `${url.protocol}//${url.host}`;
-          const response = await fetch(`${baseUrl}/api/timeline`);
-          if (response.ok) {
-            const data = await response.json();
-            return { host: host.name, ...data };
-          }
-        } catch (error) {
-          console.error(`Error fetching timeline from ${host.name}:`, error);
-        }
-        return null;
-      });
-
-      const [topologyResults, heatmapResults, timelineResults] = await Promise.all([
-        Promise.all(topologyPromises),
-        Promise.all(heatmapPromises),
-        Promise.all(timelinePromises)
-      ]);
-
-      // Combine topology data from all hosts
-      const allTopologyGpus = topologyResults
-        .filter(result => result && result.gpus)
-        .flatMap(result => result.gpus.map(gpu => ({ ...gpu, host: result.host })));
+      // Process topology data
+      const allTopologyGpus = hostResults
+        .filter(result => result.topology && result.topology.gpus)
+        .flatMap(result => result.topology.gpus.map(gpu => ({ ...gpu, host: result.host })));
 
       if (allTopologyGpus.length > 0) {
         setTopologyData({ gpus: allTopologyGpus });
       }
 
-      // Combine heatmap data from all hosts
-      const validHeatmapResults = heatmapResults.filter(result => result && result.hosts);
+      // Process heatmap data
+      const validHeatmapResults = hostResults.filter(result => result.heatmap && result.heatmap.hosts);
       if (validHeatmapResults.length > 0) {
         const combinedHeatmap = {
-          hosts: validHeatmapResults.flatMap(result => result.hosts),
-          timestamps: validHeatmapResults[0].timestamps, // Use first host's timestamps
+          hosts: validHeatmapResults.flatMap(result => result.heatmap.hosts),
+          timestamps: validHeatmapResults[0].heatmap.timestamps,
           metrics: {
-            utilization: validHeatmapResults.flatMap(result => result.metrics.utilization),
-            temperature: validHeatmapResults.flatMap(result => result.metrics.temperature),
-            power: validHeatmapResults.flatMap(result => result.metrics.power),
-            memory: validHeatmapResults.flatMap(result => result.metrics.memory)
+            utilization: validHeatmapResults.flatMap(result => result.heatmap.metrics?.utilization || []),
+            temperature: validHeatmapResults.flatMap(result => result.heatmap.metrics?.temperature || []),
+            power: validHeatmapResults.flatMap(result => result.heatmap.metrics?.power || []),
+            memory: validHeatmapResults.flatMap(result => result.heatmap.metrics?.memory || [])
           }
         };
         setHeatmapData(combinedHeatmap);
       }
 
-      // Combine timeline data from all hosts
-      const validTimelineResults = timelineResults.filter(result => result && result.events);
+      // Process timeline data
+      const validTimelineResults = hostResults.filter(result => result.timeline && result.timeline.events);
       if (validTimelineResults.length > 0) {
         const combinedTimeline = {
-          events: validTimelineResults.flatMap(result => result.events)
+          events: validTimelineResults.flatMap(result => result.timeline.events),
+          hosts: [...new Set(validTimelineResults.flatMap(result => result.timeline.events.map(event => event.host)))]
         };
         setTimelineData(combinedTimeline);
       }
+
+      setAdvancedDataLoaded(true);
 
     } catch (error) {
       console.error('Error fetching advanced visualization data:', error);
@@ -190,7 +181,7 @@ export default function Dashboard() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ hostUrl: baseUrl }),
-        signal: AbortSignal.timeout(10000) // 10 second timeout
+        signal: AbortSignal.timeout(3000) // 3 second timeout for faster initial load
       });
       
       if (response.ok) {
@@ -216,31 +207,49 @@ export default function Dashboard() {
       }
       const data = await response.json() as NvidiaSmiResponse;
       
-      // Check for Ollama availability on this host
-      const ollamaInfo = await checkOllamaAvailability(host.url);
-      
-      return {
+      const hostData = {
         url: host.url,
         name: host.name,
         isConnected: true,
         gpus: data.gpus || [],
         timestamp: data.timestamp,
         error: undefined,
-        ollama: ollamaInfo.isAvailable ? {
-          isAvailable: true,
-          models: ollamaInfo.models || [],
-          performanceMetrics: ollamaInfo.performanceMetrics || {
-            tokensPerSecond: 0,
-            modelLoadTimeMs: 0,
-            totalDurationMs: 0,
-            promptProcessingMs: 0,
-            averageLatency: 0,
-            requestCount: 0,
-            errorCount: 0
-          },
-          recentRequests: ollamaInfo.recentRequests || []
-        } : undefined
+        ollama: undefined
       };
+
+      // Check for Ollama availability asynchronously (don't block main loading)
+      checkOllamaAvailability(host.url).then(ollamaInfo => {
+        if (ollamaInfo.isAvailable) {
+          // Update the host data with Ollama info when available
+          setHostsData(prevData => 
+            prevData.map(h => 
+              h.url === host.url 
+                ? { 
+                    ...h, 
+                    ollama: {
+                      isAvailable: true,
+                      models: ollamaInfo.models || [],
+                      performanceMetrics: ollamaInfo.performanceMetrics || {
+                        tokensPerSecond: 0,
+                        modelLoadTimeMs: 0,
+                        totalDurationMs: 0,
+                        promptProcessingMs: 0,
+                        averageLatency: 0,
+                        requestCount: 0,
+                        errorCount: 0
+                      },
+                      recentRequests: ollamaInfo.recentRequests || []
+                    }
+                  }
+                : h
+            )
+          );
+        }
+      }).catch(() => {
+        // Silently fail Ollama check to not block GPU monitoring
+      });
+      
+      return hostData;
     } catch (error) {
       return {
         url: host.url,
@@ -276,8 +285,7 @@ export default function Dashboard() {
     const results = await Promise.all(hosts.map(fetchHostData));
     setHostsData(results);
     
-    // Fetch advanced visualization data
-    await fetchAdvancedVisualizationData();
+    // Don't fetch advanced visualization data on initial load - load lazily when tab is accessed
     
     // Update host connection status without overwriting hosts state
     // This prevents the glitch where newly added hosts disappear
@@ -309,6 +317,13 @@ export default function Dashboard() {
       }
     }
   }, [hosts, demo, refreshInterval, demoData]);
+
+  // Lazy load advanced visualization data when needed
+  useEffect(() => {
+    if (activeTab === "visualizations" && !advancedDataLoaded && hosts.length > 0) {
+      fetchAdvancedVisualizationData();
+    }
+  }, [activeTab, advancedDataLoaded, hosts.length]);
 
   const handleRefreshInterval = (value: string) => {
     const interval = parseInt(value);
@@ -342,8 +357,8 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-background">
       <Helmet>
-        <title>GPU Monitor - Multi-Host NVIDIA GPU Monitoring</title>
-        <meta name="description" content="Professional multi-host GPU monitoring dashboard for NVIDIA graphics cards with real-time metrics and process tracking." />
+        <title>Accelera - High-Performance GPU Acceleration Platform</title>
+        <meta name="description" content="Professional GPU acceleration platform for NVIDIA graphics cards with advanced AI workload management, real-time monitoring, and performance optimization." />
       </Helmet>
 
       {/* Header */}
@@ -351,13 +366,15 @@ export default function Dashboard() {
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="p-2 bg-emerald/10 rounded-lg">
-                <Monitor className="h-6 w-6 text-emerald" />
-              </div>
+              <img 
+                src="/logo.png" 
+                alt="Accelera" 
+                className="h-12 w-auto"
+              />
               <div>
-                <h1 className="text-2xl font-bold text-foreground">GPU Monitor</h1>
+                <h1 className="text-2xl font-bold text-foreground">Accelera</h1>
                 <p className="text-sm text-muted-foreground">
-                  Multi-host NVIDIA GPU performance monitoring
+                  High-Performance GPU Acceleration Platform
                 </p>
               </div>
             </div>
@@ -377,11 +394,11 @@ export default function Dashboard() {
               </div>
               <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm ${
                 (connectedHosts.length > 0 || hostsWithOllama > 0)
-                  ? "bg-emerald/10 text-emerald" 
+                  ? "bg-accelera-green/10 text-accelera-green" 
                   : "bg-red-500/10 text-red-500"
               }`}>
                 <div className={`w-2 h-2 rounded-full ${
-                  (connectedHosts.length > 0 || hostsWithOllama > 0) ? "bg-emerald animate-pulse-slow" : "bg-red-500"
+                  (connectedHosts.length > 0 || hostsWithOllama > 0) ? "bg-accelera-green animate-pulse-slow" : "bg-red-500"
                 }`} />
                 {(connectedHosts.length > 0 || hostsWithOllama > 0) ? "Online" : "Offline"}
               </div>
@@ -409,7 +426,7 @@ export default function Dashboard() {
                 <Monitor className="h-4 w-4" />
                 {host.name}
                 {host.isConnected && (
-                  <div className="w-2 h-2 bg-emerald rounded-full" />
+                  <div className="w-2 h-2 bg-accelera-green rounded-full" />
                 )}
               </TabsTrigger>
             ))}
@@ -449,15 +466,21 @@ export default function Dashboard() {
               </TabsList>
 
               <TabsContent value="topology">
-                <GPUTopologyMap data={topologyData} />
+                <Suspense fallback={<div className="h-[400px] flex items-center justify-center">Loading topology visualization...</div>}>
+                  <GPUTopologyMap data={topologyData} />
+                </Suspense>
               </TabsContent>
 
               <TabsContent value="heatmap">
-                <GPU3DHeatmap data={heatmapData} />
+                <Suspense fallback={<div className="h-[400px] flex items-center justify-center">Loading 3D heatmap...</div>}>
+                  <GPU3DHeatmap data={heatmapData} />
+                </Suspense>
               </TabsContent>
 
               <TabsContent value="timeline">
-                <AIWorkloadTimeline data={timelineData} />
+                <Suspense fallback={<div className="h-[400px] flex items-center justify-center">Loading timeline visualization...</div>}>
+                  <AIWorkloadTimeline data={timelineData} />
+                </Suspense>
               </TabsContent>
             </Tabs>
           </TabsContent>
@@ -560,7 +583,7 @@ export default function Dashboard() {
       <footer className="border-t bg-card/50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between text-sm text-muted-foreground">
-            <div>GPU Monitor v2.0 - Multi-Host Professional GPU Monitoring</div>
+            <div>Accelera v2.0 - High-Performance GPU Acceleration Platform</div>
             <div className="flex items-center space-x-4">
               {(totalGpus > 0 || totalOllamaModels > 0) && (
                 <div className="flex items-center gap-4">

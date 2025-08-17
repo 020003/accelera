@@ -82,7 +82,7 @@ export default function AdvancedVisualizations() {
   return (
     <div className="min-h-screen bg-background">
       <Helmet>
-        <title>Advanced Visualizations - GPU Monitor</title>
+        <title>Advanced Visualizations - Accelera</title>
         <meta name="description" content="Advanced GPU monitoring visualizations including topology maps, 3D heatmaps, and AI workload timelines." />
       </Helmet>
 
@@ -91,9 +91,11 @@ export default function AdvancedVisualizations() {
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="p-2 bg-primary/10 rounded-lg">
-                <TrendingUp className="h-6 w-6 text-primary" />
-              </div>
+              <img 
+                src="/logo.png" 
+                alt="Accelera" 
+                className="h-10 w-auto"
+              />
               <div>
                 <h1 className="text-2xl font-bold text-foreground">Advanced Visualizations</h1>
                 <p className="text-sm text-muted-foreground">
