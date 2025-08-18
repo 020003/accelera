@@ -137,32 +137,52 @@ export function AIWorkloadTimeline({ data }: { data?: TimelineData }) {
       ? timelineData.events 
       : timelineData.events.filter(event => event.host === selectedHost);
     
+    // Ensure absolutely unique IDs by adding timestamp and random suffix
+    const uniqueEvents = filteredEvents.map((event, index) => ({
+      ...event,
+      id: `${event.id}-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`
+    }));
+    
     // Convert events to timeline items
     const items = new DataSet(
-      filteredEvents.map(event => {
+      uniqueEvents.map(event => {
         const config = eventTypeConfig[event.type];
         const statusInfo = statusConfig[event.status];
+        
+        const startDate = typeof event.start === 'string' ? new Date(event.start) : event.start;
+        let endDate = event.end ? (typeof event.end === 'string' ? new Date(event.end) : event.end) : null;
+        
+        // Ensure minimum visible duration for short events (at least 2 minutes)
+        const minDuration = 2 * 60 * 1000; // 2 minutes in milliseconds
+        if (endDate && (endDate.getTime() - startDate.getTime()) < minDuration) {
+          endDate = new Date(startDate.getTime() + minDuration);
+        }
+        
+        // If no end date, create a visible range (5 minutes)
+        if (!endDate) {
+          endDate = new Date(startDate.getTime() + 5 * 60 * 1000);
+        }
         
         return {
           id: event.id,
           content: `
-            <div class="flex items-center gap-2 p-2">
-              <span style="font-size: 16px;">${config.icon}</span>
+            <div style="padding: 8px 12px; min-height: 50px; display: flex; align-items: center; gap: 8px; background: ${config.color}; border-radius: 6px; color: white; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+              <span style="font-size: 18px;">${config.icon}</span>
               <div>
-                <div class="font-semibold text-sm">${event.model || 'Unknown Model'}</div>
-                <div class="text-xs opacity-75">${event.host} • ${event.gpu}</div>
+                <div style="font-size: 14px; font-weight: bold; margin-bottom: 2px;">${event.model || event.content}</div>
+                <div style="font-size: 11px; opacity: 0.9;">${event.host} • ${event.gpu || 'GPU'}</div>
                 ${event.metadata?.tokensPerSecond ? 
-                  `<div class="text-xs">⚡ ${event.metadata.tokensPerSecond.toFixed(1)} t/s</div>` : 
+                  `<div style="font-size: 11px; opacity: 0.9;">⚡ ${event.metadata.tokensPerSecond.toFixed(1)} t/s</div>` : 
                   ''
                 }
               </div>
             </div>
           `,
-          start: event.start,
-          end: event.end,
-          type: event.status === 'running' ? 'point' : 'range',
+          start: startDate,
+          end: endDate,
+          type: 'range', // Always use range type for better visibility
           className: `timeline-item timeline-${event.type} timeline-${event.status}`,
-          style: `background-color: ${config.color}; border-color: ${statusInfo.color};`,
+          style: `background-color: ${config.color}; border: 2px solid ${statusInfo.color}; border-radius: 6px; min-height: 50px;`,
           title: `
             Type: ${config.label}
             Model: ${event.model}
@@ -176,12 +196,33 @@ export function AIWorkloadTimeline({ data }: { data?: TimelineData }) {
       })
     );
     
+    
+    // Calculate time range from events or use default
+    const now = new Date();
+    const twoHoursAgo = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+    
+    let startTime = twoHoursAgo;
+    let endTime = now;
+    
+    if (uniqueEvents.length > 0) {
+      const eventTimes = uniqueEvents.map(e => {
+        const start = typeof e.start === 'string' ? new Date(e.start) : e.start;
+        return start.getTime();
+      });
+      const minTime = Math.min(...eventTimes);
+      const maxTime = Math.max(...eventTimes);
+      
+      startTime = new Date(minTime - 30 * 60 * 1000); // 30 min before first event
+      endTime = new Date(maxTime + 30 * 60 * 1000); // 30 min after last event
+      
+    }
+    
     // Timeline options
     const options: TimelineOptions = {
       width: '100%',
-      height: '400px',
-      start: new Date(Date.now() - 2 * 60 * 60 * 1000),
-      end: new Date(),
+      height: '500px', // Increased height
+      start: startTime,
+      end: endTime,
       zoomMin: 60 * 1000, // 1 minute
       zoomMax: 24 * 60 * 60 * 1000, // 24 hours
       orientation: 'top',
@@ -193,20 +234,24 @@ export function AIWorkloadTimeline({ data }: { data?: TimelineData }) {
           hour: 'HH:mm',
         },
         majorLabels: {
-          minute: 'ddd DD',
-          hour: 'ddd DD',
+          minute: 'ddd DD MMM',
+          hour: 'ddd DD MMM',
         },
       },
       margin: {
         item: {
-          horizontal: 10,
-          vertical: 5,
+          horizontal: 5, // Reduced horizontal margin
+          vertical: 10, // Increased vertical margin for better separation
         },
+        axis: 50, // More space for time labels
       },
       tooltip: {
         followMouse: true,
         overflowMethod: 'cap',
       },
+      groupOrder: 'content', // Order groups by content
+      itemsAlwaysDraggable: false, // Disable dragging for cleaner look
+      editable: false, // Disable editing
     };
     
     // Create or update timeline
@@ -220,7 +265,7 @@ export function AIWorkloadTimeline({ data }: { data?: TimelineData }) {
     timelineInstance.current.on('select', (properties) => {
       const selectedId = properties.items[0];
       if (selectedId) {
-        const event = filteredEvents.find(e => e.id === selectedId);
+        const event = uniqueEvents.find(e => e.id === selectedId);
         if (event) {
           console.log('Selected event:', event);
         }

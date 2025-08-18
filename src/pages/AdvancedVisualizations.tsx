@@ -10,27 +10,14 @@ import { AIWorkloadTimeline } from '@/components/AIWorkloadTimeline';
 import { NetworkIcon, BarChart3, Clock, TrendingUp, Cpu, Bot, ArrowLeft } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
+import { useTopology } from '@/hooks/useTopology';
 
 export default function AdvancedVisualizations() {
-  const [topologyData, setTopologyData] = useState(null);
+  const { data: topologyData, loading: topologyLoading, error: topologyError } = useTopology();
   const [heatmapData, setHeatmapData] = useState(null);
   const [timelineData, setTimelineData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('topology');
-
-  // Fetch topology data
-  const fetchTopologyData = async () => {
-    try {
-      const response = await fetch('/api/topology');
-      if (response.ok) {
-        const data = await response.json();
-        setTopologyData(data);
-      }
-    } catch (error) {
-      console.error('Error fetching topology data:', error);
-      toast.error('Failed to load topology data');
-    }
-  };
 
   // Fetch heatmap data
   const fetchHeatmapData = async () => {
@@ -64,7 +51,6 @@ export default function AdvancedVisualizations() {
   const loadAllData = async () => {
     setIsLoading(true);
     await Promise.all([
-      fetchTopologyData(),
       fetchHeatmapData(),
       fetchTimelineData(),
     ]);
@@ -78,6 +64,13 @@ export default function AdvancedVisualizations() {
     const interval = setInterval(loadAllData, 30000);
     return () => clearInterval(interval);
   }, []);
+  
+  // Show topology error if any
+  useEffect(() => {
+    if (topologyError) {
+      console.error('Topology error:', topologyError);
+    }
+  }, [topologyError]);
 
   return (
     <div className="min-h-screen bg-background">

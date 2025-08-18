@@ -1,6 +1,7 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNvidiaSmi } from "@/hooks/useNvidiaSmi";
+import { useTopology } from "@/hooks/useTopology";
 import { HostManager } from "@/components/HostManager";
 import { MultiHostOverview } from "@/components/MultiHostOverview";
 import { HostTab } from "@/components/HostTab";
@@ -62,10 +63,11 @@ export default function Dashboard() {
   });
   const [hostsData, setHostsData] = useState<HostData[]>([]);
   const [activeTab, setActiveTab] = useState("overview");
-  const [topologyData, setTopologyData] = useState(null);
+  const { data: topologyData } = useTopology();
   const [heatmapData, setHeatmapData] = useState(null);
   const [timelineData, setTimelineData] = useState(null);
   const [advancedDataLoaded, setAdvancedDataLoaded] = useState(false);
+  const [ollamaStatus, setOllamaStatus] = useState<Record<string, any>>({});
   
   // Create a Map for the PowerUsageChart
   const hostDataMap = new Map(
@@ -96,18 +98,14 @@ export default function Dashboard() {
           const url = new URL(host.url);
           const baseUrl = `${url.protocol}//${url.host}`;
           
-          // Fetch all APIs for this host in parallel
-          const [topologyResponse, heatmapResponse, timelineResponse] = await Promise.allSettled([
-            fetch(`${baseUrl}/api/topology`, { signal: timeoutController.signal }),
+          // Fetch heatmap and timeline APIs for this host in parallel
+          const [heatmapResponse, timelineResponse] = await Promise.allSettled([
             fetch(`${baseUrl}/api/heatmap?metric=utilization&hours=2`, { signal: timeoutController.signal }), // Reduced hours for faster loading
             fetch(`${baseUrl}/api/timeline`, { signal: timeoutController.signal })
           ]);
 
-          const results = { host: host.name, topology: null, heatmap: null, timeline: null };
+          const results = { host: host.name, heatmap: null, timeline: null };
 
-          if (topologyResponse.status === 'fulfilled' && topologyResponse.value.ok) {
-            results.topology = await topologyResponse.value.json();
-          }
           if (heatmapResponse.status === 'fulfilled' && heatmapResponse.value.ok) {
             results.heatmap = await heatmapResponse.value.json();
           }
@@ -118,21 +116,12 @@ export default function Dashboard() {
           return results;
         } catch (error) {
           console.error(`Error fetching data from ${host.name}:`, error);
-          return { host: host.name, topology: null, heatmap: null, timeline: null };
+          return { host: host.name, heatmap: null, timeline: null };
         }
       });
 
       const hostResults = await Promise.all(hostPromises);
       clearTimeout(timeoutId);
-
-      // Process topology data
-      const allTopologyGpus = hostResults
-        .filter(result => result.topology && result.topology.gpus)
-        .flatMap(result => result.topology.gpus.map(gpu => ({ ...gpu, host: result.host })));
-
-      if (allTopologyGpus.length > 0) {
-        setTopologyData({ gpus: allTopologyGpus });
-      }
 
       // Process heatmap data
       const validHeatmapResults = hostResults.filter(result => result.heatmap && result.heatmap.hosts);
@@ -152,10 +141,19 @@ export default function Dashboard() {
 
       // Process timeline data
       const validTimelineResults = hostResults.filter(result => result.timeline && result.timeline.events);
+      
       if (validTimelineResults.length > 0) {
+        // Ensure unique event IDs by prefixing with host index
+        const allEvents = validTimelineResults.flatMap((result, hostIndex) => 
+          result.timeline.events.map((event: any) => ({
+            ...event,
+            id: `host${hostIndex}-${event.id}` // Make IDs unique across hosts
+          }))
+        );
+        
         const combinedTimeline = {
-          events: validTimelineResults.flatMap(result => result.timeline.events),
-          hosts: [...new Set(validTimelineResults.flatMap(result => result.timeline.events.map(event => event.host)))]
+          events: allEvents,
+          hosts: [...new Set(validTimelineResults.flatMap(result => result.timeline.events.map((event: any) => event.host)))]
         };
         setTimelineData(combinedTimeline);
       }
@@ -217,37 +215,87 @@ export default function Dashboard() {
         ollama: undefined
       };
 
-      // Check for Ollama availability asynchronously (don't block main loading)
-      checkOllamaAvailability(host.url).then(ollamaInfo => {
-        if (ollamaInfo.isAvailable) {
-          // Update the host data with Ollama info when available
-          setHostsData(prevData => 
-            prevData.map(h => 
-              h.url === host.url 
-                ? { 
-                    ...h, 
-                    ollama: {
-                      isAvailable: true,
-                      models: ollamaInfo.models || [],
-                      performanceMetrics: ollamaInfo.performanceMetrics || {
-                        tokensPerSecond: 0,
-                        modelLoadTimeMs: 0,
-                        totalDurationMs: 0,
-                        promptProcessingMs: 0,
-                        averageLatency: 0,
-                        requestCount: 0,
-                        errorCount: 0
-                      },
-                      recentRequests: ollamaInfo.recentRequests || []
+      // Check for Ollama availability (with caching to avoid flickering)
+      const hostKey = host.url;
+      const cachedOllamaStatus = ollamaStatus[hostKey];
+      const now = Date.now();
+      
+      // Only check Ollama if we don't have cached data or it's older than 5 minutes
+      if (!cachedOllamaStatus || (now - cachedOllamaStatus.lastChecked) > 300000) {
+        checkOllamaAvailability(host.url).then(ollamaInfo => {
+          const newOllamaStatus = {
+            ...ollamaInfo,
+            lastChecked: now
+          };
+          
+          // Cache the result
+          setOllamaStatus(prev => ({
+            ...prev,
+            [hostKey]: newOllamaStatus
+          }));
+          
+          if (ollamaInfo.isAvailable) {
+            // Update the host data with Ollama info when available
+            setHostsData(prevData => 
+              prevData.map(h => 
+                h.url === host.url 
+                  ? { 
+                      ...h, 
+                      ollama: {
+                        isAvailable: true,
+                        models: ollamaInfo.models || [],
+                        performanceMetrics: ollamaInfo.performanceMetrics || {
+                          tokensPerSecond: 0,
+                          modelLoadTimeMs: 0,
+                          totalDurationMs: 0,
+                          promptProcessingMs: 0,
+                          averageLatency: 0,
+                          requestCount: 0,
+                          errorCount: 0
+                        },
+                        recentRequests: ollamaInfo.recentRequests || []
+                      }
                     }
+                  : h
+              )
+            );
+          }
+        }).catch(() => {
+          // Cache the failure too
+          setOllamaStatus(prev => ({
+            ...prev,
+            [hostKey]: {
+              isAvailable: false,
+              lastChecked: now
+            }
+          }));
+        });
+      } else if (cachedOllamaStatus.isAvailable) {
+        // Use cached Ollama data
+        setHostsData(prevData => 
+          prevData.map(h => 
+            h.url === host.url 
+              ? { 
+                  ...h, 
+                  ollama: {
+                    isAvailable: true,
+                    models: cachedOllamaStatus.models || [],
+                    performanceMetrics: cachedOllamaStatus.performanceMetrics || {
+                      tokensPerSecond: 0,
+                      modelLoadTimeMs: 0,
+                      totalDurationMs: 0,
+                      promptProcessingMs: 0,
+                      averageLatency: 0,
+                      requestCount: 0,
+                      errorCount: 0
+                    },
+                    recentRequests: cachedOllamaStatus.recentRequests || []
                   }
-                : h
-            )
-          );
-        }
-      }).catch(() => {
-        // Silently fail Ollama check to not block GPU monitoring
-      });
+                }
+              : h
+          )
+        );
+      }
       
       return hostData;
     } catch (error) {
@@ -283,7 +331,62 @@ export default function Dashboard() {
     }
 
     const results = await Promise.all(hosts.map(fetchHostData));
-    setHostsData(results);
+    
+    // Smart update - only update if data actually changed
+    setHostsData(prevData => {
+      const newData = [...prevData];
+      let hasChanges = false;
+      
+      results.forEach((newHostData) => {
+        const existingIndex = newData.findIndex(h => h.url === newHostData.url);
+        
+        if (existingIndex >= 0) {
+          const existing = newData[existingIndex];
+          
+          // Only update if there are meaningful changes
+          const gpusChanged = existing.gpus.length !== newHostData.gpus.length ||
+            existing.gpus.some((gpu, i) => {
+              const newGpu = newHostData.gpus[i];
+              return !newGpu || 
+                gpu.utilization !== newGpu.utilization ||
+                gpu.temperature !== newGpu.temperature ||
+                gpu.power.draw !== newGpu.power.draw ||
+                gpu.memory.used !== newGpu.memory.used;
+            });
+          
+          if (
+            existing.isConnected !== newHostData.isConnected ||
+            existing.error !== newHostData.error ||
+            existing.timestamp !== newHostData.timestamp ||
+            gpusChanged ||
+            (!existing.ollama && newHostData.ollama) // Only add ollama if it wasn't there before
+          ) {
+            newData[existingIndex] = {
+              ...existing,
+              ...newHostData,
+              // Preserve ollama data if it exists and new data doesn't have it
+              ollama: newHostData.ollama || existing.ollama
+            };
+            hasChanges = true;
+          }
+        } else {
+          // New host
+          newData.push(newHostData);
+          hasChanges = true;
+        }
+      });
+      
+      // Remove hosts that no longer exist
+      const filteredData = newData.filter(hostData => 
+        results.some(r => r.url === hostData.url)
+      );
+      
+      if (filteredData.length !== newData.length) {
+        hasChanges = true;
+      }
+      
+      return hasChanges ? filteredData : prevData;
+    });
     
     // Don't fetch advanced visualization data on initial load - load lazily when tab is accessed
     
@@ -324,6 +427,9 @@ export default function Dashboard() {
       fetchAdvancedVisualizationData();
     }
   }, [activeTab, advancedDataLoaded, hosts.length]);
+
+  // The timeline is nested under visualizations tab, so we fetch it when visualizations is accessed
+  // The existing fetchAdvancedVisualizationData already handles timeline data
 
   const handleRefreshInterval = (value: string) => {
     const interval = parseInt(value);

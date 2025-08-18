@@ -481,7 +481,7 @@ def collect_historical_data():
         traceback.print_exc()
 
 def parse_topology_matrix():
-    """Parse nvidia-smi topo -m output to get real interconnection data"""
+    """Parse nvidia-smi topo -m output to get real interconnection data including NICs"""
     try:
         # Get topology matrix from nvidia-smi (strip color codes)
         result = run_cmd("nvidia-smi topo -m")
@@ -503,51 +503,108 @@ def parse_topology_matrix():
         
         if matrix_start == -1:
             print("No topology matrix header found")
-            return {}
+            return {'gpus': {}, 'nics': {}, 'nic_legend': {}}
             
-        # Parse header to get GPU indices from the full line
+        # Parse header to get GPU and NIC indices from the full line
         header_line = lines[matrix_start]
         print(f"Raw header line: '{header_line}'")
         header_parts = header_line.split()
         
-        # Find all GPU column indices
+        # Find all GPU and NIC column indices
         gpu_columns = []
+        nic_columns = []
         for i, part in enumerate(header_parts):
-            if part.startswith('GPU') and len(part) > 3:  # GPU0, GPU1, etc.
+            if re.match(r'^GPU\d+$', part):  # Exactly GPU followed by digits
                 gpu_columns.append((i, part))
+            elif re.match(r'^NIC\d+$', part):  # Exactly NIC followed by digits
+                nic_columns.append((i, part))
         print(f"Found GPU columns: {gpu_columns}")
+        print(f"Found NIC columns: {nic_columns}")
         
         # Parse matrix data
         topology_matrix = {}
+        nic_connections = {}
+        
         for i in range(matrix_start + 1, len(lines)):
             line = lines[i].strip()
-            if not line or line.startswith('Legend') or line.startswith('NIC'):
+            if not line or line.startswith('Legend'):
                 break
                 
             parts = line.split()
             if len(parts) < 2:
                 continue
                 
-            src_gpu = parts[0]
-            if not src_gpu.startswith('GPU') or len(src_gpu) <= 3:
-                continue
+            src_device = parts[0]
+            
+            # Process GPU rows
+            if src_device.startswith('GPU') and len(src_device) > 3:
+                print(f"Processing {src_device}: {parts}")
                 
-            print(f"Processing {src_gpu}: {parts}")
+                connections = {}
+                # Map each GPU column to its connection type
+                # Note: parts[0] is the source GPU name, so column indices need offset +1
+                for col_idx, dst_gpu in gpu_columns:
+                    parts_idx = col_idx + 1  # Offset by 1 because parts[0] is source GPU name
+                    if parts_idx < len(parts):
+                        connection_type = parts[parts_idx]
+                        if src_device != dst_gpu and connection_type != 'X':  # Don't include self-connections or disabled
+                            connections[dst_gpu] = connection_type
+                            print(f"  Found GPU connection: {src_device} -> {dst_gpu} via {connection_type}")
+                
+                # Also check NIC connections
+                nic_conns = {}
+                for col_idx, dst_nic in nic_columns:
+                    parts_idx = col_idx + 1  # Offset by 1 because parts[0] is source GPU name
+                    if parts_idx < len(parts):
+                        connection_type = parts[parts_idx]
+                        if connection_type != 'X':
+                            nic_conns[dst_nic] = connection_type
+                            print(f"  Found NIC connection: {src_device} -> {dst_nic} via {connection_type}")
+                
+                topology_matrix[src_device] = {'gpus': connections, 'nics': nic_conns}
+                print(f"Added {src_device} connections: {connections}, NICs: {nic_conns}")
             
-            connections = {}
-            # Map each GPU column to its connection type
-            for col_idx, dst_gpu in gpu_columns:
-                if col_idx < len(parts):
-                    connection_type = parts[col_idx]
-                    if src_gpu != dst_gpu and connection_type != 'X':  # Don't include self-connections or disabled
-                        connections[dst_gpu] = connection_type
-                        print(f"  Found connection: {src_gpu} -> {dst_gpu} via {connection_type}")
-            
-            topology_matrix[src_gpu] = connections
-            print(f"Added {src_gpu} connections: {connections}")
+            # Process NIC rows
+            elif src_device.startswith('NIC') and len(src_device) > 3:
+                print(f"Processing {src_device}: {parts}")
+                connections = {}
+                
+                # Map GPU connections from NIC
+                for col_idx, dst_gpu in gpu_columns:
+                    parts_idx = col_idx + 1  # Offset by 1 because parts[0] is source NIC name
+                    if parts_idx < len(parts):
+                        connection_type = parts[parts_idx]
+                        if connection_type != 'X':
+                            connections[dst_gpu] = connection_type
+                            print(f"  Found NIC->GPU connection: {src_device} -> {dst_gpu} via {connection_type}")
+                
+                nic_connections[src_device] = connections
+        
+        # Parse NIC Legend
+        nic_legend = {}
+        for i, line in enumerate(lines):
+            if line.strip().startswith('NIC Legend:'):
+                # Parse the NIC legend section
+                for j in range(i + 1, len(lines)):
+                    legend_line = lines[j].strip()
+                    if legend_line and ':' in legend_line:
+                        parts = legend_line.split(':')
+                        if len(parts) == 2:
+                            nic_id = parts[0].strip()
+                            nic_name = parts[1].strip()
+                            nic_legend[nic_id] = nic_name
+                            print(f"NIC Legend: {nic_id} = {nic_name}")
+                break
         
         print(f"Final topology matrix: {topology_matrix}")
-        return topology_matrix
+        print(f"NIC connections: {nic_connections}")
+        print(f"NIC legend: {nic_legend}")
+        
+        return {
+            'gpus': topology_matrix,
+            'nics': nic_connections,
+            'nic_legend': nic_legend
+        }
         
     except Exception as e:
         print(f"Error parsing topology matrix: {e}")
@@ -628,27 +685,33 @@ def detect_gpu_topology():
         # Get basic GPU info
         gpus = get_gpus()
         hostname = socket.gethostname()
+        print(f"Detecting topology for {len(gpus)} GPUs on {hostname}")
         
-        # Get real topology matrix
-        topology_matrix = parse_topology_matrix()
+        # Get real topology matrix including NICs
+        topology_data = parse_topology_matrix()
+        topology_matrix = topology_data.get('gpus', {})
+        nic_connections = topology_data.get('nics', {})
+        nic_legend = topology_data.get('nic_legend', {})
+        print(f"Topology matrix keys: {list(topology_matrix.keys())}")
+        print(f"NIC legend: {nic_legend}")
         
         # Get network interfaces for multi-host connectivity
         network_interfaces = get_network_interfaces()
         
         # Map connection types to bandwidth and human-readable names
         connection_map = {
-            'NV1': {'type': 'NVLink1', 'bandwidth': 25, 'description': 'NVLink 1st gen'},
-            'NV2': {'type': 'NVLink2', 'bandwidth': 50, 'description': 'NVLink 2nd gen'},
-            'NV3': {'type': 'NVLink3', 'bandwidth': 100, 'description': 'NVLink 3rd gen'},
-            'NV4': {'type': 'NVLink4', 'bandwidth': 112, 'description': 'NVLink 4th gen'},
-            'NV6': {'type': 'NVLink6', 'bandwidth': 200, 'description': 'NVLink 6th gen'},
-            'SYS': {'type': 'PCIe', 'bandwidth': 32, 'description': 'PCIe connection through system'},
-            'NODE': {'type': 'PCIe', 'bandwidth': 24, 'description': 'PCIe connection through NUMA node'},
-            'PHB': {'type': 'PCIe', 'bandwidth': 16, 'description': 'PCIe connection through PCIe host bridge'},
-            'PIX': {'type': 'PCIe', 'bandwidth': 32, 'description': 'PCIe connection through PCIe switch'},
-            'PXB': {'type': 'PCIe', 'bandwidth': 16, 'description': 'PCIe connection through PCIe-to-PCIe bridge'},
-            'SOC': {'type': 'SoC', 'bandwidth': 200, 'description': 'SoC interconnect'},
-            'X': {'type': 'Disabled', 'bandwidth': 0, 'description': 'Connection disabled or not available'}
+            'NV1': {'type': 'NVLink', 'bandwidth': 25, 'description': 'NVLink 1st gen (25 GB/s per link)'},
+            'NV2': {'type': 'NVLink', 'bandwidth': 50, 'description': 'NVLink 2nd gen (50 GB/s per link)'},
+            'NV3': {'type': 'NVLink', 'bandwidth': 100, 'description': 'NVLink 3rd gen (100 GB/s per link)'},
+            'NV4': {'type': 'NVLink', 'bandwidth': 112, 'description': 'NVLink 4th gen (112 GB/s per link)'},
+            'NV6': {'type': 'NVLink', 'bandwidth': 200, 'description': 'NVLink 6th gen (200 GB/s per link)'},
+            'SYS': {'type': 'PCIe-SYS', 'bandwidth': 32, 'description': 'PCIe traversing NUMA nodes (Cross-socket)'},
+            'NODE': {'type': 'PCIe-NODE', 'bandwidth': 24, 'description': 'PCIe within NUMA node'},
+            'PHB': {'type': 'PCIe-PHB', 'bandwidth': 16, 'description': 'PCIe through Host Bridge'},
+            'PIX': {'type': 'PCIe-PIX', 'bandwidth': 32, 'description': 'PCIe through single switch'},
+            'PXB': {'type': 'PCIe-PXB', 'bandwidth': 16, 'description': 'PCIe through multiple bridges'},
+            'SOC': {'type': 'SoC', 'bandwidth': 200, 'description': 'System-on-Chip interconnect'},
+            'X': {'type': 'Self', 'bandwidth': 0, 'description': 'Self or disabled connection'}
         }
         
         topology_gpus = []
@@ -656,36 +719,88 @@ def detect_gpu_topology():
             connections = []
             gpu_key = f"GPU{i}"
             
-            # Get connections from topology matrix
+            # Get GPU connections from topology matrix
             if gpu_key in topology_matrix:
-                for target_gpu, conn_type in topology_matrix[gpu_key].items():
-                    # Skip invalid targets (like empty "GPU" entries)
-                    if not target_gpu.startswith('GPU') or len(target_gpu) <= 3:
-                        print(f"Skipping invalid GPU target: {target_gpu}")
-                        continue
-                        
-                    try:
-                        target_idx = int(target_gpu.replace('GPU', ''))
-                        
-                        # Map connection type
-                        conn_info = connection_map.get(conn_type, {
-                            'type': conn_type,
-                            'bandwidth': 32,
-                            'description': f'Unknown connection type {conn_type}'
-                        })
-                        
-                        # Include NODE connections but skip X (disabled) connections
-                        if conn_type != 'X' and conn_info['bandwidth'] > 0:
-                            connections.append({
-                                'target': f"gpu-{target_idx}",
-                                'type': conn_info['type'],
-                                'bandwidth': conn_info['bandwidth'],
-                                'description': conn_info['description'],
-                                'raw_type': conn_type
+                gpu_data = topology_matrix[gpu_key]
+                
+                # Process GPU-to-GPU connections
+                if isinstance(gpu_data, dict) and 'gpus' in gpu_data:
+                    for target_gpu, conn_type in gpu_data['gpus'].items():
+                        if not target_gpu.startswith('GPU') or len(target_gpu) <= 3:
+                            continue
+                            
+                        try:
+                            target_idx = int(target_gpu.replace('GPU', ''))
+                            
+                            # Map connection type
+                            conn_info = connection_map.get(conn_type, {
+                                'type': conn_type,
+                                'bandwidth': 32,
+                                'description': f'Connection type: {conn_type}'
                             })
-                    except ValueError:
-                        print(f"Skipping invalid GPU target: {target_gpu}")
-                        continue
+                            
+                            if conn_type != 'X' and conn_info['bandwidth'] > 0:
+                                connections.append({
+                                    'target': f"gpu-{target_idx}",
+                                    'type': conn_info['type'],
+                                    'bandwidth': conn_info['bandwidth'],
+                                    'description': conn_info['description'],
+                                    'raw_type': conn_type
+                                })
+                                print(f"  Added connection: {gpu_key} -> gpu-{target_idx} via {conn_type} ({conn_info['type']})")
+                        except ValueError:
+                            print(f"  Error parsing target GPU: {target_gpu}")
+                            continue
+                else:
+                    # Handle old format where gpu_data is a dict of connections directly
+                    for target_gpu, conn_type in topology_matrix.get(gpu_key, {}).items():
+                        if not target_gpu.startswith('GPU') or len(target_gpu) <= 3:
+                            continue
+                            
+                        try:
+                            target_idx = int(target_gpu.replace('GPU', ''))
+                            
+                            # Map connection type
+                            conn_info = connection_map.get(conn_type, {
+                                'type': conn_type,
+                                'bandwidth': 32,
+                                'description': f'Connection type: {conn_type}'
+                            })
+                            
+                            if conn_type != 'X' and conn_info['bandwidth'] > 0:
+                                connections.append({
+                                    'target': f"gpu-{target_idx}",
+                                    'type': conn_info['type'],
+                                    'bandwidth': conn_info['bandwidth'],
+                                    'description': conn_info['description'],
+                                    'raw_type': conn_type
+                                })
+                                print(f"  Added connection (fallback): {gpu_key} -> gpu-{target_idx} via {conn_type} ({conn_info['type']})")
+                        except ValueError:
+                            print(f"  Error parsing target GPU: {target_gpu}")
+                            continue
+                
+                # Process GPU-to-NIC connections for Mellanox detection
+                nic_info = []
+                if isinstance(gpu_data, dict) and 'nics' in gpu_data:
+                    for nic_id, conn_type in gpu_data['nics'].items():
+                        nic_name = nic_legend.get(nic_id, nic_id)
+                        if 'mlx' in nic_name.lower():
+                            conn_info = connection_map.get(conn_type, {
+                                'type': conn_type,
+                                'bandwidth': 32,
+                                'description': f'Connection to {nic_name}'
+                            })
+                            nic_info.append({
+                                'nic_id': nic_id,
+                                'nic_name': nic_name,
+                                'connection_type': conn_type,
+                                'description': conn_info['description']
+                            })
+                            print(f"  Added NIC connection: {gpu_key} -> {nic_name} via {conn_type}")
+            else:
+                print(f"No topology data found for {gpu_key}")
+                nic_info = []
             
             # Add GPU with enhanced information
             gpu_info = {
@@ -697,20 +812,34 @@ def detect_gpu_topology():
                 'temperature': gpu['temperature'],
                 'power': gpu['power'],
                 'connections': connections,
+                'nic_connections': nic_info if 'nic_info' in locals() else [],
                 'pci_info': gpu.get('pci', {}),
                 'uuid': gpu.get('uuid', f"GPU-{i}")
             }
             
             topology_gpus.append(gpu_info)
         
+        # Detect Mellanox NICs for inter-host connectivity
+        mellanox_nics = []
+        for nic_id, nic_name in nic_legend.items():
+            if 'mlx' in nic_name.lower():
+                mellanox_nics.append({
+                    'id': nic_id,
+                    'name': nic_name,
+                    'type': 'Mellanox InfiniBand/Ethernet'
+                })
+        
         return {
             'gpus': topology_gpus,
             'host_info': {
                 'hostname': hostname,
                 'network_interfaces': network_interfaces,
-                'gpu_count': len(gpus)
+                'gpu_count': len(gpus),
+                'mellanox_nics': mellanox_nics
             },
-            'topology_matrix': topology_matrix
+            'topology_matrix': topology_matrix,
+            'nic_connections': nic_connections,
+            'nic_legend': nic_legend
         }
             
     except Exception as e:
@@ -751,18 +880,18 @@ def simulate_workload_event(event_type, model_name, status):
 def get_topology():
     """Get GPU topology information"""
     try:
-        # Use cached topology or generate new one
-        cache_key = f"topology_{socket.gethostname()}"
-        if cache_key not in topology_cache or time.time() - topology_cache[cache_key]['timestamp'] > 300:  # 5 min cache
-            topology_cache[cache_key] = {
-                'data': detect_gpu_topology(),
-                'timestamp': time.time()
-            }
-        
-        return jsonify(topology_cache[cache_key]['data'])
+        # Simple approach: just return what detect_gpu_topology returns
+        topology_data = detect_gpu_topology()
+        return jsonify(topology_data)
         
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        import traceback
+        error_details = {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+        print(f"ERROR in get_topology: {error_details}", flush=True)
+        return jsonify(error_details), 500
 
 @app.route("/api/heatmap", methods=['GET'])
 def get_heatmap_data():

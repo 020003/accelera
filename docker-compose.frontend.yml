@@ -1,5 +1,5 @@
-
 version: "3.8"
+
 services:
   frontend:
     build:
@@ -9,6 +9,16 @@ services:
       - "8080:8080"
     environment:
       - HOST=0.0.0.0
+      - VITE_PORT=8080
+      - VITE_API_URL=http://192.168.1.10:5000
+      - VITE_BACKEND_HOSTS=http://192.168.1.10:5000,http://192.168.1.11:5000,http://192.168.1.12:5000
     volumes:
       - .:/app
       - /app/node_modules
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
