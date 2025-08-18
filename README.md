@@ -68,7 +68,7 @@ Get Accelera running in under 2 minutes:
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-org/accelera.git
+git clone https://github.com/020003/accelera.git
 cd accelera
 
 # 2. Configure environment
@@ -121,10 +121,10 @@ Accelera provides three powerful visualization modes:
 ## 🤖 AI/ML Platform Integration
 
 ### Supported AI Platforms
-- **Ollama** - Local AI model serving (auto-discovery)
-- **NVIDIA Triton** - Production inference server (coming soon)
-- **TensorFlow Serving** - TensorFlow model deployment (coming soon)
-- **PyTorch Serve** - PyTorch model serving (coming soon)
+- **Ollama** - Local AI model serving with auto-discovery ✅
+- **NVIDIA Triton** - Production inference server (community contribution welcome)
+- **TensorFlow Serving** - TensorFlow model deployment (community contribution welcome)  
+- **PyTorch Serve** - PyTorch model serving (community contribution welcome)
 
 ### AI Workload Metrics
 - **Model Performance** - Tokens/second, latency, throughput
@@ -350,7 +350,7 @@ spec:
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/accelera.git
+git clone https://github.com/020003/accelera.git
 cd accelera
 
 # Install dependencies
@@ -364,45 +364,51 @@ cd server && python app.py  # Backend (localhost:5000)
 
 ## 📚 Documentation
 
-- **[User Guide](docs/user-guide.md)** - Complete user documentation
-- **[API Reference](docs/api-reference.md)** - REST API documentation
-- **[Deployment Guide](docs/deployment.md)** - Production deployment guide
-- **[Contributing](docs/contributing.md)** - Development and contribution guide
-- **[Security](docs/security.md)** - Security implementation details
+- **[Quick Start Guide](docs/QUICKSTART.md)** - Get up and running in minutes
+- **[API Reference](docs/API.md)** - Complete REST API documentation  
+- **[Deployment Guide](docs/DEPLOYMENT.md)** - Production deployment guide
+- **[GitHub Issues](https://github.com/020003/accelera/issues)** - Bug reports and feature requests
+- **[GitHub Discussions](https://github.com/020003/accelera/discussions)** - Community support
 
 ## 🆘 Support & Community
 
 ### Getting Help
-- **Documentation** - Check our comprehensive docs
-- **GitHub Issues** - Report bugs and request features
-- **Community Forum** - Join discussions and get help
-- **Enterprise Support** - Contact us for enterprise support
+- **Documentation** - Check our comprehensive docs in the [docs/](docs/) folder
+- **GitHub Issues** - [Report bugs and request features](https://github.com/020003/accelera/issues)  
+- **GitHub Discussions** - [Join community discussions](https://github.com/020003/accelera/discussions)
+- **Wiki** - [Community-maintained guides](https://github.com/020003/accelera/wiki)
 
-### Community
-- **Discord** - Join our developer community
-- **Twitter** - Follow [@AcceleraPlatform](https://twitter.com/acceleraplatform) for updates
-- **LinkedIn** - Connect with the team
-- **YouTube** - Watch tutorials and demos
+### Contributing
+We welcome contributions from the community! Whether it's:
+- 🐛 **Bug fixes** and improvements
+- 📊 **New visualizations** and features  
+- 📚 **Documentation** enhancements
+- 🧪 **Testing** and quality assurance
+- 🎨 **UI/UX** improvements
 
-## 📈 Roadmap
+See our [Contributing Guidelines](CONTRIBUTING.md) to get started.
 
-### 2024 Q1
-- ✅ **Multi-host GPU monitoring**
-- ✅ **Advanced visualizations**
-- ✅ **AI workload integration**
-- ✅ **Docker deployment**
+## 🎯 Current Status
 
-### 2024 Q2
-- 🚧 **Kubernetes integration**
-- 🚧 **Advanced alerting system**
-- 🚧 **Performance optimization**
-- 🚧 **Enhanced security features**
+Accelera is now **production-ready** with all core features implemented:
 
-### 2024 Q3
-- ⏳ **Multi-cloud support**
-- ⏳ **Advanced analytics**
-- ⏳ **Mobile application**
-- ⏳ **Enterprise SSO**
+### ✅ **Completed Features**
+- **Multi-host GPU monitoring** - Monitor unlimited GPU servers
+- **Advanced visualizations** - 3D heatmaps, topology maps, AI timelines  
+- **AI workload integration** - Ollama auto-discovery and monitoring
+- **Docker deployment** - Production-ready containerization
+- **Real-time dashboard** - Live metrics with configurable intervals
+- **Responsive UI** - Works on desktop, tablet, and mobile
+
+### 🔮 **Future Enhancements**
+Community-driven development continues with potential additions:
+- **Kubernetes operator** for cloud-native deployments
+- **Advanced alerting** and notification systems
+- **Multi-cloud support** for hybrid environments
+- **Extended AI platform** integrations (Triton, TensorFlow Serving)
+- **Mobile application** for on-the-go monitoring
+
+**Want to contribute?** Check our [Issues](https://github.com/020003/accelera/issues) page or submit feature requests!
 
 ## 📄 License
 
@@ -445,6 +451,6 @@ Open source project with active community contributions, regular updates, and tr
 
 ---
 
-**Ready to accelerate your GPU infrastructure?** [Get started today](https://github.com/your-org/accelera) 🚀
+**Ready to accelerate your GPU infrastructure?** [Get started today](https://github.com/020003/accelera) 🚀
 
 *Built with ❤️ for the AI/ML and HPC communities*
