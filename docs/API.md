@@ -110,7 +110,7 @@ Get GPU interconnect topology information.
     {
       "id": "gpu-0",
       "name": "NVIDIA H100 80GB HBM3",
-      "host": "192.168.1.10",
+      "host": "gpu-node-1",
       "connections": [
         {
           "target": "gpu-1",
@@ -130,7 +130,7 @@ Get GPU interconnect topology information.
     }
   ],
   "hosts": {
-    "192.168.1.10": {
+    "gpu-node-1": {
       "hostname": "gpu-node-1",
       "gpu_count": 8,
       "mellanox_nics": [

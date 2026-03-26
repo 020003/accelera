@@ -1,278 +1,375 @@
-import React, { useState, useEffect } from 'react';
-import { Helmet } from 'react-helmet-async';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { GPUTopologyMap } from '@/components/GPUTopologyMap';
-import { GPU3DHeatmap } from '@/components/GPU3DHeatmap';
-import { AIWorkloadTimeline } from '@/components/AIWorkloadTimeline';
-import { NetworkIcon, BarChart3, Clock, TrendingUp, Cpu, Bot, ArrowLeft } from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { toast } from 'sonner';
-import { useTopology } from '@/hooks/useTopology';
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Helmet } from "react-helmet-async";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { GPUTopologyMap } from "@/components/GPUTopologyMap";
+import { GPU3DHeatmap } from "@/components/GPU3DHeatmap";
+import { AIWorkloadTimeline } from "@/components/AIWorkloadTimeline";
+import {
+  NetworkIcon,
+  BarChart3,
+  Clock,
+  ArrowLeft,
+  RefreshCw,
+  Server,
+  Activity,
+  Thermometer,
+  Zap,
+  HardDrive,
+  Loader2,
+  Layers,
+  Brain,
+  Cpu,
+  Cable,
+} from "lucide-react";
+import { Link } from "react-router-dom";
+import { useTopology } from "@/hooks/useTopology";
+
+interface Host {
+  url: string;
+  name: string;
+}
+
+const HEATMAP_HOURS = [
+  { label: "2h", hours: 2 },
+  { label: "6h", hours: 6 },
+  { label: "12h", hours: 12 },
+  { label: "24h", hours: 24 },
+] as const;
+
+function getHosts(): Host[] {
+  try {
+    return JSON.parse(localStorage.getItem("gpu_monitor_hosts") || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function baseUrl(hostUrl: string): string {
+  try {
+    const u = new URL(hostUrl);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return hostUrl.replace(/\/nvidia-smi\.json$/, "");
+  }
+}
+
+function Spinner({ className = "" }: { className?: string }) {
+  return <Loader2 className={`animate-spin ${className}`} />;
+}
 
 export default function AdvancedVisualizations() {
-  const { data: topologyData, loading: topologyLoading, error: topologyError } = useTopology();
-  const [heatmapData, setHeatmapData] = useState(null);
-  const [timelineData, setTimelineData] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('topology');
+  const hosts = useMemo(getHosts, []);
+  const {
+    data: topologyData,
+    loading: topologyLoading,
+    error: topologyError,
+  } = useTopology();
 
-  // Fetch heatmap data
-  const fetchHeatmapData = async () => {
+  const [heatmapData, setHeatmapData] = useState<any>(null);
+  const [timelineData, setTimelineData] = useState<any>(null);
+  const [heatmapLoading, setHeatmapLoading] = useState(false);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [heatmapHours, setHeatmapHours] = useState(6);
+  const [activeTab, setActiveTab] = useState("topology");
+
+  // Fetch heatmap from all hosts and merge
+  const fetchHeatmap = useCallback(async () => {
+    if (hosts.length === 0) return;
+    setHeatmapLoading(true);
     try {
-      const response = await fetch('/api/heatmap?metric=utilization&hours=24');
-      if (response.ok) {
-        const data = await response.json();
-        setHeatmapData(data);
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 8000);
+      const results = await Promise.allSettled(
+        hosts.map((h) =>
+          fetch(
+            `${baseUrl(h.url)}/api/heatmap?metric=utilization&hours=${heatmapHours}`,
+            { signal: ctrl.signal }
+          ).then((r) => (r.ok ? r.json() : null))
+        )
+      );
+      clearTimeout(timeout);
+      const valid = results
+        .filter(
+          (r): r is PromiseFulfilledResult<any> =>
+            r.status === "fulfilled" && r.value?.hosts
+        )
+        .map((r) => r.value);
+      if (valid.length > 0) {
+        setHeatmapData({
+          hosts: valid.flatMap((v: any) => v.hosts),
+          timestamps: valid[0].timestamps,
+          metrics: {
+            utilization: valid.flatMap((v: any) => v.metrics?.utilization || []),
+            temperature: valid.flatMap((v: any) => v.metrics?.temperature || []),
+            power: valid.flatMap((v: any) => v.metrics?.power || []),
+            memory: valid.flatMap((v: any) => v.metrics?.memory || []),
+          },
+        });
       }
-    } catch (error) {
-      console.error('Error fetching heatmap data:', error);
-      toast.error('Failed to load heatmap data');
+    } catch {
+      /* ignore */
     }
-  };
+    setHeatmapLoading(false);
+  }, [hosts, heatmapHours]);
 
-  // Fetch timeline data
-  const fetchTimelineData = async () => {
+  // Fetch timeline from all hosts and merge
+  const fetchTimeline = useCallback(async () => {
+    if (hosts.length === 0) return;
+    setTimelineLoading(true);
     try {
-      const response = await fetch('/api/timeline');
-      if (response.ok) {
-        const data = await response.json();
-        setTimelineData(data);
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 8000);
+      const results = await Promise.allSettled(
+        hosts.map((h) =>
+          fetch(`${baseUrl(h.url)}/api/timeline`, { signal: ctrl.signal }).then(
+            (r) => (r.ok ? r.json() : null)
+          )
+        )
+      );
+      clearTimeout(timeout);
+      const valid = results
+        .filter(
+          (r): r is PromiseFulfilledResult<any> =>
+            r.status === "fulfilled" && r.value?.events
+        )
+        .map((r) => r.value);
+      if (valid.length > 0) {
+        const allEvents = valid.flatMap((v: any, idx: number) =>
+          v.events.map((e: any) => ({ ...e, id: `h${idx}-${e.id}` }))
+        );
+        setTimelineData({
+          events: allEvents,
+          hosts: [
+            ...new Set(
+              valid.flatMap((v: any) =>
+                v.events.map((e: any) => e.host)
+              )
+            ),
+          ],
+        });
       }
-    } catch (error) {
-      console.error('Error fetching timeline data:', error);
-      toast.error('Failed to load timeline data');
+    } catch {
+      /* ignore */
     }
+    setTimelineLoading(false);
+  }, [hosts]);
+
+  // Lazy-load data when tab becomes active
+  useEffect(() => {
+    if (activeTab === "heatmap" && !heatmapData) fetchHeatmap();
+    if (activeTab === "timeline" && !timelineData) fetchTimeline();
+  }, [activeTab]);
+
+  // Re-fetch heatmap when hours change
+  useEffect(() => {
+    if (activeTab === "heatmap") fetchHeatmap();
+  }, [heatmapHours]);
+
+  const handleRefresh = () => {
+    if (activeTab === "topology") {
+      /* topology hook auto-refreshes */
+    }
+    if (activeTab === "heatmap") fetchHeatmap();
+    if (activeTab === "timeline") fetchTimeline();
   };
 
-  // Load all data
-  const loadAllData = async () => {
-    setIsLoading(true);
-    await Promise.all([
-      fetchHeatmapData(),
-      fetchTimelineData(),
-    ]);
-    setIsLoading(false);
-  };
-
-  useEffect(() => {
-    loadAllData();
-    
-    // Refresh data every 30 seconds
-    const interval = setInterval(loadAllData, 30000);
-    return () => clearInterval(interval);
-  }, []);
-  
-  // Show topology error if any
-  useEffect(() => {
-    if (topologyError) {
-      console.error('Topology error:', topologyError);
-    }
-  }, [topologyError]);
+  const isCurrentLoading =
+    (activeTab === "topology" && topologyLoading) ||
+    (activeTab === "heatmap" && heatmapLoading) ||
+    (activeTab === "timeline" && timelineLoading);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
       <Helmet>
         <title>Advanced Visualizations - Accelera</title>
-        <meta name="description" content="Advanced GPU monitoring visualizations including topology maps, 3D heatmaps, and AI workload timelines." />
       </Helmet>
 
-      {/* Header */}
-      <header className="navbar">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <img 
-                src="/logo.png" 
-                alt="Accelera" 
-                className="h-10 w-auto"
-              />
-              <div>
-                <h1 className="text-2xl font-bold text-foreground">Advanced Visualizations</h1>
-                <p className="text-sm text-muted-foreground">
-                  Comprehensive GPU cluster analysis and AI workload monitoring
-                </p>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <Link to="/">
-                <Button variant="outline" size="sm" className="flex items-center gap-2">
-                  <ArrowLeft className="h-4 w-4" />
-                  Back to Dashboard
-                </Button>
-              </Link>
-              <Badge variant="outline" className="flex items-center gap-1">
-                <Cpu className="h-3 w-3" />
-                Multi-Host Analysis
-              </Badge>
-              <Badge variant="outline" className="flex items-center gap-1">
-                <Bot className="h-3 w-3" />
-                AI Workload Tracking
-              </Badge>
-            </div>
+      {/* ── Compact header ── */}
+      <header className="border-b bg-card/50 sticky top-0 z-30 backdrop-blur-sm">
+        <div className="container mx-auto px-4 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Link to="/">
+              <Button variant="ghost" size="sm" className="gap-1.5 h-8 -ml-2">
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Dashboard
+              </Button>
+            </Link>
+            <div className="h-5 w-px bg-border" />
+            <h1 className="text-sm font-semibold">Advanced Visualizations</h1>
+            <Badge variant="secondary" className="text-[10px] h-5 gap-1">
+              <Server className="h-3 w-3" />
+              {hosts.length} host{hosts.length !== 1 ? "s" : ""}
+            </Badge>
           </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 gap-1.5"
+            onClick={handleRefresh}
+            disabled={isCurrentLoading}
+          >
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${isCurrentLoading ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </Button>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="container mx-auto px-4 py-6">
-        {isLoading ? (
-          <Card>
-            <CardContent className="flex items-center justify-center py-12">
-              <div className="flex items-center gap-3">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-                <span>Loading advanced visualizations...</span>
-              </div>
-            </CardContent>
-          </Card>
-        ) : (
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="topology" className="flex items-center gap-2">
-                <NetworkIcon className="h-4 w-4" />
-                GPU Topology
-              </TabsTrigger>
-              <TabsTrigger value="heatmap" className="flex items-center gap-2">
-                <BarChart3 className="h-4 w-4" />
-                3D Heatmap
-              </TabsTrigger>
-              <TabsTrigger value="timeline" className="flex items-center gap-2">
-                <Clock className="h-4 w-4" />
-                AI Timeline
-              </TabsTrigger>
-            </TabsList>
+      {/* ── Main ── */}
+      <main className="flex-1 container mx-auto px-4 py-4 space-y-4">
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="space-y-4"
+        >
+          <TabsList>
+            <TabsTrigger value="topology" className="gap-1.5 text-xs">
+              <NetworkIcon className="h-3.5 w-3.5" />
+              GPU Topology
+            </TabsTrigger>
+            <TabsTrigger value="heatmap" className="gap-1.5 text-xs">
+              <BarChart3 className="h-3.5 w-3.5" />
+              Cluster Heatmap
+            </TabsTrigger>
+            <TabsTrigger value="timeline" className="gap-1.5 text-xs">
+              <Clock className="h-3.5 w-3.5" />
+              Workload Timeline
+            </TabsTrigger>
+          </TabsList>
 
-            <TabsContent value="topology" className="space-y-6">
-              <div className="grid gap-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <NetworkIcon className="h-5 w-5" />
-                      GPU Topology Overview
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-muted-foreground mb-4">
-                      Interactive network diagram showing GPU interconnections, memory hierarchy, 
-                      and data flow between GPUs. Identify bottlenecks in GPU-to-GPU communication 
-                      and optimize model parallelism strategies.
-                    </p>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-green-500">NVLink</div>
-                        <div className="text-sm text-muted-foreground">High Speed</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-amber-500">SXM</div>
-                        <div className="text-sm text-muted-foreground">Ultra High Speed</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-indigo-500">PCIe</div>
-                        <div className="text-sm text-muted-foreground">Standard</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-primary">Real-time</div>
-                        <div className="text-sm text-muted-foreground">Live Metrics</div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <GPUTopologyMap data={topologyData} />
-              </div>
-            </TabsContent>
+          {/* ───── Topology ───── */}
+          <TabsContent value="topology" className="space-y-3">
+            {/* Compact legend */}
+            <div className="flex items-center gap-3 flex-wrap">
+              {[
+                { label: "NVLink", color: "bg-green-500", desc: "High speed" },
+                { label: "SXM", color: "bg-amber-500", desc: "Ultra high speed" },
+                { label: "PCIe", color: "bg-indigo-500", desc: "Standard" },
+              ].map((l) => (
+                <div key={l.label} className="flex items-center gap-1.5 text-xs">
+                  <div className={`w-2.5 h-2.5 rounded-full ${l.color}`} />
+                  <span className="font-medium">{l.label}</span>
+                  <span className="text-muted-foreground">{l.desc}</span>
+                </div>
+              ))}
+            </div>
 
-            <TabsContent value="heatmap" className="space-y-6">
-              <div className="grid gap-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <BarChart3 className="h-5 w-5" />
-                      3D Cluster Heatmap Analysis
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-muted-foreground mb-4">
-                      Three-dimensional visualization showing GPU utilization patterns over time across 
-                      multiple hosts. Quickly identify resource waste, anomalies, and optimization 
-                      opportunities in large GPU clusters.
-                    </p>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-blue-500">Utilization</div>
-                        <div className="text-sm text-muted-foreground">GPU Usage %</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-red-500">Temperature</div>
-                        <div className="text-sm text-muted-foreground">Thermal °C</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-yellow-500">Power</div>
-                        <div className="text-sm text-muted-foreground">Watts Draw</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-purple-500">Memory</div>
-                        <div className="text-sm text-muted-foreground">VRAM Usage %</div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <GPU3DHeatmap data={heatmapData} />
-              </div>
-            </TabsContent>
+            {topologyLoading ? (
+              <LoadingPlaceholder text="Loading GPU topology..." />
+            ) : topologyError ? (
+              <ErrorPlaceholder text="Failed to load topology data. Check host connectivity." />
+            ) : (
+              <GPUTopologyMap data={topologyData} />
+            )}
+          </TabsContent>
 
-            <TabsContent value="timeline" className="space-y-6">
-              <div className="grid gap-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Clock className="h-5 w-5" />
-                      AI Workload Timeline
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-muted-foreground mb-4">
-                      Gantt-chart style visualization of Ollama model loading, inference requests, 
-                      and GPU allocation over time. Optimize model scheduling and identify 
-                      opportunities for batching or model switching.
-                    </p>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                      <div className="text-center">
-                        <div className="text-2xl">📚</div>
-                        <div className="text-sm text-muted-foreground">Model Loading</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl">🧠</div>
-                        <div className="text-sm text-muted-foreground">Inference</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl">⚡</div>
-                        <div className="text-sm text-muted-foreground">GPU Allocation</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl">🎓</div>
-                        <div className="text-sm text-muted-foreground">Training</div>
-                      </div>
+          {/* ───── Heatmap ───── */}
+          <TabsContent value="heatmap" className="space-y-3">
+            {/* Controls */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3 flex-wrap text-xs">
+                {[
+                  { icon: Activity, label: "Utilization", color: "text-blue-500" },
+                  { icon: Thermometer, label: "Temperature", color: "text-red-500" },
+                  { icon: Zap, label: "Power", color: "text-amber-500" },
+                  { icon: HardDrive, label: "Memory", color: "text-purple-500" },
+                ].map((m) => {
+                  const Icon = m.icon;
+                  return (
+                    <div key={m.label} className="flex items-center gap-1">
+                      <Icon className={`h-3.5 w-3.5 ${m.color}`} />
+                      <span className="text-muted-foreground">{m.label}</span>
                     </div>
-                  </CardContent>
-                </Card>
-                <AIWorkloadTimeline data={timelineData} />
+                  );
+                })}
               </div>
-            </TabsContent>
-          </Tabs>
-        )}
+              <ToggleGroup
+                type="single"
+                value={String(heatmapHours)}
+                onValueChange={(v) => v && setHeatmapHours(Number(v))}
+                className="h-7"
+              >
+                {HEATMAP_HOURS.map((r) => (
+                  <ToggleGroupItem
+                    key={r.hours}
+                    value={String(r.hours)}
+                    className="text-xs px-2.5 h-7"
+                  >
+                    {r.label}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </div>
+
+            {heatmapLoading ? (
+              <LoadingPlaceholder text="Loading heatmap data..." />
+            ) : !heatmapData ? (
+              <ErrorPlaceholder text="No heatmap data available. Ensure hosts are connected and have historical data." />
+            ) : (
+              <GPU3DHeatmap data={heatmapData} />
+            )}
+          </TabsContent>
+
+          {/* ───── Timeline ───── */}
+          <TabsContent value="timeline" className="space-y-3">
+            {/* Compact legend */}
+            <div className="flex items-center gap-4 flex-wrap text-xs">
+              {[
+                { label: "Model Loading", color: "bg-blue-500", icon: Layers },
+                { label: "Inference", color: "bg-emerald-500", icon: Brain },
+                { label: "GPU Allocation", color: "bg-violet-500", icon: Cpu },
+                { label: "Training", color: "bg-blue-400", icon: Cable },
+              ].map((l) => {
+                const Icon = l.icon;
+                return (
+                  <div key={l.label} className="flex items-center gap-1.5">
+                    <div className={`w-2.5 h-2.5 rounded-sm ${l.color}`} />
+                    <Icon className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-muted-foreground">{l.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {timelineLoading ? (
+              <LoadingPlaceholder text="Loading timeline data..." />
+            ) : !timelineData ? (
+              <ErrorPlaceholder text="No timeline data available. Workload events appear as Ollama processes requests." />
+            ) : (
+              <AIWorkloadTimeline data={timelineData} />
+            )}
+          </TabsContent>
+        </Tabs>
       </main>
-
-      {/* Footer */}
-      <footer className="border-t mt-12">
-        <div className="container mx-auto px-4 py-6">
-          <div className="text-center text-sm text-muted-foreground">
-            Advanced GPU monitoring visualizations powered by D3.js, Plotly.js, and React Flow
-          </div>
-        </div>
-      </footer>
     </div>
+  );
+}
+
+function LoadingPlaceholder({ text }: { text: string }) {
+  return (
+    <Card>
+      <CardContent className="flex items-center justify-center py-20">
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Spinner className="h-5 w-5" />
+          <span className="text-sm">{text}</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ErrorPlaceholder({ text }: { text: string }) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+        <BarChart3 className="h-8 w-8 mb-3 opacity-30" />
+        <p className="text-sm">{text}</p>
+      </CardContent>
+    </Card>
   );
 }

@@ -1,13 +1,20 @@
-
 version: "3.8"
 services:
   gpu-exporter:
     build:
       context: ./server
+    restart: unless-stopped
     ports:
       - "5000:5000"
     environment:
       - FLASK_ENV=production
+      - FLASK_HOST=0.0.0.0
+      - FLASK_PORT=5000
+      - CORS_ORIGINS=*
+      - PROMETHEUS_ENABLED=true
+      - GPU_COLLECT_INTERVAL=60
+      - LOG_LEVEL=INFO
+      - OLLAMA_HOST=http://host.docker.internal:11434
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     # For Docker Compose with NVIDIA toolkit
@@ -22,5 +29,11 @@ services:
     pid: "host"
     # Additional privileges for process detection
     privileged: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - /proc:/host/proc:ro
+      - accelera-data:/app/data
+
+volumes:
+  accelera-data:

@@ -1,16 +1,34 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Server, 
-  Cpu, 
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  Cell,
+} from "recharts";
+import {
+  Server,
+  Cpu,
   Activity,
-  HardDrive, 
-  Thermometer, 
+  HardDrive,
+  Thermometer,
   Zap,
+  Bot,
+  Hash,
+  TrendingUp,
+  MessageSquare,
   DollarSign,
+  CheckCircle,
   AlertTriangle,
-  CheckCircle
 } from "lucide-react";
+import { useFleetTokenStats } from "@/hooks/useFleetTokenStats";
 import type { GpuInfo } from "@/types/gpu";
 
 interface HostData {
@@ -20,6 +38,12 @@ interface HostData {
   gpus: GpuInfo[];
   timestamp?: string;
   error?: string;
+  ollama?: {
+    isAvailable: boolean;
+    models: any[];
+    performanceMetrics: any;
+    recentRequests: any[];
+  };
 }
 
 interface MultiHostOverviewProps {
@@ -27,207 +51,580 @@ interface MultiHostOverviewProps {
   energyRate: number;
 }
 
+function fmt(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toString();
+}
+
+function fmtDur(s: number): string {
+  if (s < 60) return `${Math.round(s)}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  return `${(s / 3600).toFixed(1)}h`;
+}
+
+const TIME_RANGES = [
+  { label: "1h", hours: 1 },
+  { label: "6h", hours: 6 },
+  { label: "12h", hours: 12 },
+  { label: "24h", hours: 24 },
+  { label: "3d", hours: 72 },
+  { label: "7d", hours: 168 },
+] as const;
+
 export function MultiHostOverview({ hostsData, energyRate }: MultiHostOverviewProps) {
-  const connectedHosts = hostsData.filter(host => host.isConnected);
-  const totalGpus = connectedHosts.reduce((sum, host) => sum + host.gpus.length, 0);
-  const allGpus = connectedHosts.flatMap(host => host.gpus);
-  
-  const averageUtilization = allGpus.length > 0 
-    ? Math.round(allGpus.reduce((sum, gpu) => sum + gpu.utilization, 0) / allGpus.length)
-    : 0;
-  
-  const averageTemperature = allGpus.length > 0
-    ? Math.round(allGpus.reduce((sum, gpu) => sum + gpu.temperature, 0) / allGpus.length)
-    : 0;
-  
-  const totalPowerDraw = allGpus.reduce((sum, gpu) => sum + gpu.power.draw, 0);
-  const totalMemoryUsed = allGpus.reduce((sum, gpu) => sum + gpu.memory.used, 0);
-  const totalMemoryCapacity = allGpus.reduce((sum, gpu) => sum + gpu.memory.total, 0);
-  const memoryUtilization = totalMemoryCapacity > 0 
-    ? Math.round((totalMemoryUsed / totalMemoryCapacity) * 100)
-    : 0;
-  
-  const hourlyCost = energyRate > 0 ? (totalPowerDraw / 1000) * energyRate : 0;
+  const [hours, setHours] = useState(24);
+  const connectedHosts = hostsData.filter((h) => h.isConnected);
+  const allGpus = connectedHosts.flatMap((h) => h.gpus);
+  const totalGpus = allGpus.length;
+
+  const avgUtil =
+    totalGpus > 0
+      ? Math.round(allGpus.reduce((s, g) => s + g.utilization, 0) / totalGpus)
+      : 0;
+  const avgTemp =
+    totalGpus > 0
+      ? Math.round(allGpus.reduce((s, g) => s + g.temperature, 0) / totalGpus)
+      : 0;
+  const totalPower = allGpus.reduce((s, g) => s + g.power.draw, 0);
+  const memUsed = allGpus.reduce((s, g) => s + g.memory.used, 0);
+  const memTotal = allGpus.reduce((s, g) => s + g.memory.total, 0);
+  const memPct = memTotal > 0 ? Math.round((memUsed / memTotal) * 100) : 0;
+
+  const hourlyCost = energyRate > 0 ? (totalPower / 1000) * energyRate : 0;
+  const dailyCost = hourlyCost * 24;
+
+  const totalModels = hostsData.reduce(
+    (s, h) => s + (h.ollama?.models.length || 0),
+    0
+  );
+  const hostsWithOllama = hostsData.filter((h) => h.ollama?.isAvailable).length;
+
+  // Fleet-wide token stats
+  const hostUrls = hostsData.map((h) => h.url);
+  const { data: fleet } = useFleetTokenStats(hostUrls, hours);
+
+  // Per-host utilization bar chart data
+  const hostBarData = connectedHosts.map((h) => {
+    const gpus = h.gpus;
+    const util =
+      gpus.length > 0
+        ? Math.round(gpus.reduce((s, g) => s + g.utilization, 0) / gpus.length)
+        : 0;
+    return { name: h.name, util, gpus: gpus.length };
+  });
+
+  // Token history for fleet chart
+  const chartData = (fleet?.history ?? []).slice(-60).map((pt) => ({
+    time: new Date(pt.time).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    tokens: pt.total,
+    generated: pt.generated,
+    prompt: pt.prompt,
+  }));
+
+  const rangeLabel = TIME_RANGES.find((r) => r.hours === hours)?.label ?? `${hours}h`;
 
   return (
-    <div className="space-y-6">
-      {/* Global Statistics */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
-        <Card className="metric-card">
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 rounded-lg bg-emerald/10">
-                <Server className="h-5 w-5 text-emerald" />
-              </div>
-              <div>
-                <div className="text-sm font-medium text-muted-foreground">Active Hosts</div>
-                <div className="text-lg font-bold font-mono">
-                  {connectedHosts.length}/{hostsData.length}
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+    <div className="space-y-5">
+      {/* ─── Time range picker ─── */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-medium text-muted-foreground">Fleet Overview</h2>
+        <ToggleGroup
+          type="single"
+          value={String(hours)}
+          onValueChange={(v) => v && setHours(Number(v))}
+          className="h-7"
+        >
+          {TIME_RANGES.map((r) => (
+            <ToggleGroupItem
+              key={r.hours}
+              value={String(r.hours)}
+              className="text-xs px-2.5 h-7"
+            >
+              {r.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      </div>
 
-        <Card className="metric-card">
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 rounded-lg bg-emerald/10">
-                <Cpu className="h-5 w-5 text-emerald" />
-              </div>
-              <div>
-                <div className="text-sm font-medium text-muted-foreground">Total GPUs</div>
-                <div className="text-lg font-bold font-mono">{totalGpus}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="metric-card">
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-3">
-              <div className={`p-2 rounded-lg ${averageUtilization >= 80 ? 'bg-orange-500/10' : 'bg-blue-500/10'}`}>
-                <Activity className={`h-5 w-5 ${averageUtilization >= 80 ? 'text-gpu-orange' : 'text-gpu-blue'}`} />
-              </div>
-              <div>
-                <div className="text-sm font-medium text-muted-foreground">Avg Utilization</div>
-                <div className="text-lg font-bold font-mono">{averageUtilization}%</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="metric-card">
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-3">
-              <div className={`p-2 rounded-lg ${memoryUtilization >= 80 ? 'bg-red-500/10' : 'bg-purple-500/10'}`}>
-                <HardDrive className={`h-5 w-5 ${memoryUtilization >= 80 ? 'text-gpu-red' : 'text-gpu-purple'}`} />
-              </div>
-              <div>
-                <div className="text-sm font-medium text-muted-foreground">Memory Usage</div>
-                <div className="text-lg font-bold font-mono">{memoryUtilization}%</div>
-                <div className="text-xs text-muted-foreground">
-                  {Math.round(totalMemoryUsed / 1024)} / {Math.round(totalMemoryCapacity / 1024)} GB
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="metric-card">
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-3">
-              <div className={`p-2 rounded-lg ${
-                averageTemperature >= 80 ? 'bg-red-500/10' : 
-                averageTemperature >= 70 ? 'bg-orange-500/10' : 'bg-emerald/10'
-              }`}>
-                <Thermometer className={`h-5 w-5 ${
-                  averageTemperature >= 80 ? 'text-gpu-red' : 
-                  averageTemperature >= 70 ? 'text-gpu-orange' : 'text-emerald'
-                }`} />
-              </div>
-              <div>
-                <div className="text-sm font-medium text-muted-foreground">Avg Temperature</div>
-                <div className="text-lg font-bold font-mono">{averageTemperature}°C</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="metric-card">
-          <CardContent className="p-4">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 rounded-lg bg-orange-500/10">
-                <Zap className="h-5 w-5 text-gpu-orange" />
-              </div>
-              <div>
-                <div className="text-sm font-medium text-muted-foreground">Total Power</div>
-                <div className="text-lg font-bold font-mono">{Math.round(totalPowerDraw)}W</div>
-                {energyRate > 0 && (
-                  <div className="text-xs text-emerald font-medium">
-                    ${hourlyCost.toFixed(2)}/hr
+      {/* ─── Hero KPIs ─── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+        {[
+          {
+            label: "Hosts Online",
+            value: `${connectedHosts.length}/${hostsData.length}`,
+            icon: Server,
+            color: "text-emerald-500",
+            bg: "bg-emerald-500/10",
+          },
+          {
+            label: "Total GPUs",
+            value: totalGpus,
+            icon: Cpu,
+            color: "text-emerald-500",
+            bg: "bg-emerald-500/10",
+          },
+          {
+            label: "Fleet Utilization",
+            value: `${avgUtil}%`,
+            icon: Activity,
+            color: avgUtil >= 80 ? "text-amber-500" : "text-blue-500",
+            bg: avgUtil >= 80 ? "bg-amber-500/10" : "bg-blue-500/10",
+          },
+          {
+            label: "VRAM",
+            value: `${memPct}%`,
+            icon: HardDrive,
+            color: memPct >= 80 ? "text-red-500" : "text-purple-500",
+            bg: memPct >= 80 ? "bg-red-500/10" : "bg-purple-500/10",
+            sub: `${Math.round(memUsed / 1024)}/${Math.round(memTotal / 1024)} GB`,
+          },
+          {
+            label: "Avg Temp",
+            value: `${avgTemp}°C`,
+            icon: Thermometer,
+            color:
+              avgTemp >= 80
+                ? "text-red-500"
+                : avgTemp >= 70
+                ? "text-amber-500"
+                : "text-emerald-500",
+            bg:
+              avgTemp >= 80
+                ? "bg-red-500/10"
+                : avgTemp >= 70
+                ? "bg-amber-500/10"
+                : "bg-emerald-500/10",
+          },
+          {
+            label: "Power Draw",
+            value: `${Math.round(totalPower)}W`,
+            icon: Zap,
+            color: "text-amber-500",
+            bg: "bg-amber-500/10",
+            sub:
+              energyRate > 0
+                ? `$${hourlyCost.toFixed(2)}/hr`
+                : undefined,
+          },
+          {
+            label: "24h Tokens",
+            value: fmt(fleet?.summary.total_tokens ?? 0),
+            icon: Hash,
+            color: "text-blue-500",
+            bg: "bg-blue-500/10",
+            sub:
+              (fleet?.summary.current_tps ?? 0) > 0
+                ? `${fleet!.summary.current_tps} tok/s now`
+                : `${rangeLabel} window`,
+          },
+          {
+            label: "AI Models",
+            value: totalModels,
+            icon: Bot,
+            color: "text-purple-500",
+            bg: "bg-purple-500/10",
+            sub:
+              hostsWithOllama > 0
+                ? `${hostsWithOllama} host${hostsWithOllama > 1 ? "s" : ""}`
+                : undefined,
+          },
+        ].map((kpi) => {
+          const Icon = kpi.icon;
+          return (
+            <Card key={kpi.label} className="shadow-none border-border/50">
+              <CardContent className="p-3">
+                <div className="flex items-start gap-2.5">
+                  <div className={`p-1.5 rounded-md ${kpi.bg} mt-0.5`}>
+                    <Icon className={`h-4 w-4 ${kpi.color}`} />
                   </div>
-                )}
+                  <div className="min-w-0">
+                    <div className="text-[11px] text-muted-foreground leading-none mb-0.5">
+                      {kpi.label}
+                    </div>
+                    <div className="text-lg font-bold font-mono leading-tight">
+                      {kpi.value}
+                    </div>
+                    {"sub" in kpi && kpi.sub && (
+                      <div className="text-[10px] text-muted-foreground truncate">
+                        {kpi.sub}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* ─── Charts row ─── */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* Fleet Token Throughput */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              Fleet Token Throughput
+              <span className="text-xs font-normal text-muted-foreground">{rangeLabel}</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {chartData.length > 1 ? (
+              <div className="h-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart
+                    data={chartData}
+                    margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
+                  >
+                    <defs>
+                      <linearGradient id="fleetGenGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.4} />
+                        <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="fleetPtGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.3} />
+                        <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <XAxis
+                      dataKey="time"
+                      tick={{ fontSize: 10 }}
+                      tickLine={false}
+                      axisLine={false}
+                      interval="preserveStartEnd"
+                    />
+                    <YAxis
+                      tick={{ fontSize: 10 }}
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={fmt}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: "hsl(var(--popover))",
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: 8,
+                        fontSize: 12,
+                      }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="generated"
+                      name="Generated"
+                      stroke="#3b82f6"
+                      fill="url(#fleetGenGrad)"
+                      strokeWidth={1.5}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="prompt"
+                      name="Prompt"
+                      stroke="#8b5cf6"
+                      fill="url(#fleetPtGrad)"
+                      strokeWidth={1.5}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
-            </div>
+            ) : (
+              <div className="h-44 flex items-center justify-center text-sm text-muted-foreground">
+                Collecting token data — chart populates over time
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Per-host GPU utilization bar */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Activity className="h-4 w-4 text-muted-foreground" />
+              Host GPU Utilization
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {hostBarData.length > 0 ? (
+              <div className="h-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={hostBarData}
+                    margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
+                  >
+                    <XAxis
+                      dataKey="name"
+                      tick={{ fontSize: 11 }}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 10 }}
+                      tickLine={false}
+                      axisLine={false}
+                      domain={[0, 100]}
+                      tickFormatter={(v) => `${v}%`}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: "hsl(var(--popover))",
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: 8,
+                        fontSize: 12,
+                      }}
+                      formatter={(value: number) => [`${value}%`, "Utilization"]}
+                    />
+                    <Bar dataKey="util" radius={[4, 4, 0, 0]} maxBarSize={48}>
+                      {hostBarData.map((entry, idx) => (
+                        <Cell
+                          key={idx}
+                          fill={
+                            entry.util >= 80
+                              ? "#f97316"
+                              : entry.util >= 50
+                              ? "#3b82f6"
+                              : "#22c55e"
+                          }
+                          fillOpacity={0.75}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-44 flex items-center justify-center text-sm text-muted-foreground">
+                No hosts connected
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Host Summary */}
-      <Card className="control-panel">
-        <CardHeader>
-          <CardTitle>Host Summary</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {hostsData.map((host) => (
-              <Card key={host.url} className="metric-card">
-                <CardContent className="p-4">
-                  <div className="space-y-3">
+      {/* ─── Fleet AI & Cost Summary ─── */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        {/* Token breakdown */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-muted-foreground" />
+              AI Inference Summary
+              <span className="text-xs font-normal text-muted-foreground">{rangeLabel}</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-2.5 rounded-lg bg-muted/30">
+                <div className="text-[10px] text-muted-foreground">Prompt Tokens</div>
+                <div className="text-lg font-bold font-mono">
+                  {fmt(fleet?.summary.total_prompt ?? 0)}
+                </div>
+              </div>
+              <div className="p-2.5 rounded-lg bg-muted/30">
+                <div className="text-[10px] text-muted-foreground">Generated Tokens</div>
+                <div className="text-lg font-bold font-mono">
+                  {fmt(fleet?.summary.total_generated ?? 0)}
+                </div>
+              </div>
+              <div className="p-2.5 rounded-lg bg-muted/30">
+                <div className="text-[10px] text-muted-foreground">Total Requests</div>
+                <div className="text-lg font-bold font-mono">
+                  {fleet?.summary.total_requests ?? 0}
+                </div>
+              </div>
+              <div className="p-2.5 rounded-lg bg-muted/30">
+                <div className="text-[10px] text-muted-foreground">Inference Time</div>
+                <div className="text-lg font-bold font-mono">
+                  {fmtDur(fleet?.summary.total_duration_sec ?? 0)}
+                </div>
+              </div>
+            </div>
+            {Object.keys(fleet?.models ?? {}).length > 0 && (
+              <div className="space-y-1">
+                <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                  Top Models
+                </div>
+                <div className="divide-y divide-border/50">
+                  {Object.entries(fleet?.models ?? {})
+                    .sort(
+                      ([, a], [, b]) =>
+                        b.generated_tokens +
+                        b.prompt_tokens -
+                        (a.generated_tokens + a.prompt_tokens)
+                    )
+                    .slice(0, 4)
+                    .map(([name, m]) => (
+                      <div
+                        key={name}
+                        className="flex items-center justify-between py-1.5 text-xs"
+                      >
+                        <span className="font-medium truncate max-w-[55%]">
+                          {name}
+                        </span>
+                        <div className="flex items-center gap-2 text-muted-foreground shrink-0">
+                          <span className="font-mono">
+                            {fmt(m.generated_tokens + m.prompt_tokens)}
+                          </span>
+                          {m.avg_tokens_per_sec > 0 && (
+                            <span className="font-mono text-amber-500">
+                              {m.avg_tokens_per_sec} t/s
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Cost card */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+              Cost Estimator
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {energyRate > 0 ? (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-2.5 rounded-lg bg-muted/30">
+                    <div className="text-[10px] text-muted-foreground">Hourly</div>
+                    <div className="text-lg font-bold font-mono text-emerald-500">
+                      ${hourlyCost.toFixed(2)}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-muted/30">
+                    <div className="text-[10px] text-muted-foreground">Daily</div>
+                    <div className="text-lg font-bold font-mono text-emerald-500">
+                      ${dailyCost.toFixed(2)}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-muted/30">
+                    <div className="text-[10px] text-muted-foreground">Monthly (est)</div>
+                    <div className="text-lg font-bold font-mono text-emerald-500">
+                      ${(dailyCost * 30).toFixed(0)}
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-muted/30">
+                    <div className="text-[10px] text-muted-foreground">$/GPU/hr</div>
+                    <div className="text-lg font-bold font-mono text-emerald-500">
+                      {totalGpus > 0
+                        ? `$${(hourlyCost / totalGpus).toFixed(3)}`
+                        : "—"}
+                    </div>
+                  </div>
+                </div>
+                {(fleet?.summary.total_tokens ?? 0) > 0 && (
+                  <div className="p-2.5 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
+                    <div className="text-[10px] text-muted-foreground">
+                      Cost per 1K tokens (24h)
+                    </div>
+                    <div className="text-lg font-bold font-mono text-emerald-500">
+                      $
+                      {(
+                        (dailyCost / (fleet!.summary.total_tokens / 1000)) *
+                        1
+                      ).toFixed(4)}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                      Based on {fmt(fleet!.summary.total_tokens)} tokens &
+                      current power draw
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-center py-8 text-sm text-muted-foreground">
+                <DollarSign className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                Set an energy rate in Settings to see cost estimates
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Host fleet cards */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Server className="h-4 w-4 text-muted-foreground" />
+              Host Fleet
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {hostsData.map((host) => {
+                const gpus = host.gpus;
+                const util =
+                  gpus.length > 0
+                    ? Math.round(
+                        gpus.reduce((s, g) => s + g.utilization, 0) / gpus.length
+                      )
+                    : 0;
+                const power = Math.round(
+                  gpus.reduce((s, g) => s + g.power.draw, 0)
+                );
+                const hostTokens = fleet?.perHost[host.url];
+                return (
+                  <div
+                    key={host.url}
+                    className="p-2.5 rounded-lg bg-muted/30 space-y-1.5"
+                  >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <Server className="h-4 w-4" />
-                        <span className="font-medium">{host.name}</span>
+                        <div
+                          className={`w-2 h-2 rounded-full ${
+                            host.isConnected
+                              ? "bg-emerald-500"
+                              : "bg-red-500"
+                          }`}
+                        />
+                        <span className="text-sm font-medium">{host.name}</span>
                       </div>
-                      <Badge variant={host.isConnected ? "default" : "secondary"}>
-                        {host.isConnected ? (
-                          <CheckCircle className="h-3 w-3 mr-1" />
-                        ) : (
-                          <AlertTriangle className="h-3 w-3 mr-1" />
+                      <div className="flex items-center gap-2">
+                        {host.ollama?.isAvailable && (
+                          <Badge
+                            variant="secondary"
+                            className="text-[9px] h-4 px-1.5"
+                          >
+                            <Bot className="h-2.5 w-2.5 mr-0.5" />
+                            {host.ollama.models.length}
+                          </Badge>
                         )}
-                        {host.isConnected ? "Online" : "Offline"}
-                      </Badge>
+                        <Badge
+                          variant={host.isConnected ? "default" : "secondary"}
+                          className="text-[9px] h-4 px-1.5"
+                        >
+                          {host.isConnected ? "Online" : "Offline"}
+                        </Badge>
+                      </div>
                     </div>
-
-                    {host.isConnected ? (
-                      <div className="space-y-2">
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div>
-                            <span className="text-muted-foreground">GPUs:</span>
-                            <span className="ml-1 font-mono font-bold">{host.gpus.length}</span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Avg Util:</span>
-                            <span className="ml-1 font-mono font-bold">
-                              {host.gpus.length > 0 
-                                ? Math.round(host.gpus.reduce((sum, gpu) => sum + gpu.utilization, 0) / host.gpus.length)
-                                : 0}%
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Power:</span>
-                            <span className="ml-1 font-mono font-bold">
-                              {Math.round(host.gpus.reduce((sum, gpu) => sum + gpu.power.draw, 0))}W
-                            </span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Avg Temp:</span>
-                            <span className="ml-1 font-mono font-bold">
-                              {host.gpus.length > 0 
-                                ? Math.round(host.gpus.reduce((sum, gpu) => sum + gpu.temperature, 0) / host.gpus.length)
-                                : 0}°C
-                            </span>
-                          </div>
-                        </div>
-                        {host.timestamp && (
-                          <div className="text-xs text-muted-foreground">
-                            Last update: {new Date(host.timestamp).toLocaleTimeString()}
-                          </div>
+                    {host.isConnected && (
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                        <span className="font-mono">
+                          {gpus.length} GPU{gpus.length !== 1 ? "s" : ""}
+                        </span>
+                        <span className="font-mono">{util}% util</span>
+                        <span className="font-mono">{power}W</span>
+                        {hostTokens && hostTokens.summary.total_tokens > 0 && (
+                          <span className="font-mono text-blue-500">
+                            {fmt(hostTokens.summary.total_tokens)} tok
+                          </span>
                         )}
-                      </div>
-                    ) : (
-                      <div className="text-sm text-muted-foreground">
-                        {host.error || "Connection failed"}
                       </div>
                     )}
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

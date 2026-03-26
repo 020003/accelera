@@ -436,21 +436,15 @@ export function GPUTopologyMap({ data }: { data?: GPUTopologyData }) {
       
       // Determine host display name
       let hostDisplayName = host;
-      // Map container IDs to more friendly names
-      const hostNameMap: Record<string, string> = {
-        '09a30f687767': '192.168.1.10',
-        '6e4b68b6bc9c': '192.168.1.11',
-        'a44074919744': '192.168.1.12',
-      };
-      
-      if (hostNameMap[host]) {
-        hostDisplayName = hostNameMap[host];
-      } else if (host.length === 12 && /^[a-f0-9]+$/.test(host)) {
-        // If it looks like a container ID, try to extract from backend URL
+      if (host.length === 12 && /^[a-f0-9]+$/.test(host)) {
+        // Container ID — try to resolve from VITE_BACKEND_HOSTS env
+        const envHosts = (import.meta.env.VITE_BACKEND_HOSTS || '').split(',').filter(Boolean);
         const backendIndex = hosts.indexOf(host);
-        if (backendIndex >= 0 && backendIndex < 3) {
-          const ips = ['192.168.1.10', '192.168.1.11', '192.168.1.12'];
-          hostDisplayName = ips[backendIndex] || host;
+        if (backendIndex >= 0 && backendIndex < envHosts.length) {
+          const match = envHosts[backendIndex].match(/(\d+\.\d+\.\d+\.\d+)/);
+          hostDisplayName = match ? match[1] : `Host ${backendIndex + 1}`;
+        } else {
+          hostDisplayName = `Host ${backendIndex + 1}`;
         }
       }
       

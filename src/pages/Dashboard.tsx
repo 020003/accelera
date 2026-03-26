@@ -6,15 +6,20 @@ import { HostManager } from "@/components/HostManager";
 import { MultiHostOverview } from "@/components/MultiHostOverview";
 import { HostTab } from "@/components/HostTab";
 import { PowerUsageChart } from "@/components/PowerUsageChart";
+import { AlertsManager } from "@/components/AlertsManager";
+import { GpuEventsPanel } from "@/components/GpuEventsPanel";
+import { SystemStatus } from "@/components/SystemStatus";
+import { ConfigPanel } from "@/components/ConfigPanel";
+import { useAuth } from "@/hooks/useAuth";
 
 // Lazy load heavy visualization components
 const GPUTopologyMap = lazy(() => import("@/components/GPUTopologyMap").then(m => ({ default: m.GPUTopologyMap })));
 const GPU3DHeatmap = lazy(() => import("@/components/GPU3DHeatmap").then(m => ({ default: m.GPU3DHeatmap })));
 const AIWorkloadTimeline = lazy(() => import("@/components/AIWorkloadTimeline").then(m => ({ default: m.AIWorkloadTimeline })));
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Button } from "@/components/ui/button";
-import { Monitor, BarChart3, Settings, Cog, Bot, TrendingUp, ExternalLink, NetworkIcon, Clock } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Monitor, BarChart3, Settings, Cog, TrendingUp, NetworkIcon, Clock, Bell, ShieldAlert, Lock, LogOut, Activity, Thermometer, Zap, HardDrive, Layers, Brain, Cpu, Cable, Loader2, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -67,6 +72,8 @@ export default function Dashboard() {
   const [heatmapData, setHeatmapData] = useState(null);
   const [timelineData, setTimelineData] = useState(null);
   const [advancedDataLoaded, setAdvancedDataLoaded] = useState(false);
+  const [heatmapHours, setHeatmapHours] = useState(6);
+  const [vizRefreshing, setVizRefreshing] = useState(false);
   const [ollamaStatus, setOllamaStatus] = useState<Record<string, any>>({});
   
   // Create a Map for the PowerUsageChart
@@ -536,6 +543,14 @@ export default function Dashboard() {
                 )}
               </TabsTrigger>
             ))}
+            <TabsTrigger value="alerts" className="flex items-center gap-2">
+              <Bell className="h-4 w-4" />
+              Alerts
+            </TabsTrigger>
+            <TabsTrigger value="gpu-events" className="flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4" />
+              GPU Health
+            </TabsTrigger>
             <TabsTrigger value="settings" className="flex items-center gap-2">
               <Cog className="h-4 w-4" />
               Settings
@@ -554,38 +569,131 @@ export default function Dashboard() {
           </TabsContent>
 
           {/* Advanced Visualizations Tab */}
-          <TabsContent value="visualizations" className="space-y-6">
+          <TabsContent value="visualizations" className="space-y-4">
             <Tabs defaultValue="topology" className="space-y-4">
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="topology" className="flex items-center gap-2">
-                  <NetworkIcon className="h-4 w-4" />
-                  GPU Topology
-                </TabsTrigger>
-                <TabsTrigger value="heatmap" className="flex items-center gap-2">
-                  <BarChart3 className="h-4 w-4" />
-                  3D Heatmap
-                </TabsTrigger>
-                <TabsTrigger value="timeline" className="flex items-center gap-2">
-                  <Clock className="h-4 w-4" />
-                  AI Timeline
-                </TabsTrigger>
-              </TabsList>
+              {/* Tab header row */}
+              <div className="flex items-center justify-between">
+                <TabsList>
+                  <TabsTrigger value="topology" className="gap-1.5 text-xs">
+                    <NetworkIcon className="h-3.5 w-3.5" />
+                    GPU Topology
+                  </TabsTrigger>
+                  <TabsTrigger value="heatmap" className="gap-1.5 text-xs">
+                    <BarChart3 className="h-3.5 w-3.5" />
+                    Cluster Heatmap
+                  </TabsTrigger>
+                  <TabsTrigger value="timeline" className="gap-1.5 text-xs">
+                    <Clock className="h-3.5 w-3.5" />
+                    Workload Timeline
+                  </TabsTrigger>
+                </TabsList>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 text-xs"
+                  disabled={vizRefreshing}
+                  onClick={async () => {
+                    setVizRefreshing(true);
+                    setAdvancedDataLoaded(false);
+                    await fetchAdvancedVisualizationData();
+                    setVizRefreshing(false);
+                  }}
+                >
+                  <RefreshCw className={`h-3 w-3 ${vizRefreshing ? "animate-spin" : ""}`} />
+                  Refresh
+                </Button>
+              </div>
 
-              <TabsContent value="topology">
-                <Suspense fallback={<div className="h-[400px] flex items-center justify-center">Loading topology visualization...</div>}>
+              {/* ── Topology ── */}
+              <TabsContent value="topology" className="space-y-3">
+                <div className="flex items-center gap-3 flex-wrap">
+                  {[
+                    { label: "NVLink", color: "bg-green-500", desc: "High speed" },
+                    { label: "SXM", color: "bg-amber-500", desc: "Ultra high speed" },
+                    { label: "PCIe", color: "bg-indigo-500", desc: "Standard" },
+                  ].map((l) => (
+                    <div key={l.label} className="flex items-center gap-1.5 text-xs">
+                      <div className={`w-2.5 h-2.5 rounded-full ${l.color}`} />
+                      <span className="font-medium">{l.label}</span>
+                      <span className="text-muted-foreground">{l.desc}</span>
+                    </div>
+                  ))}
+                </div>
+                <Suspense fallback={<VizLoading text="Loading topology..." />}>
                   <GPUTopologyMap data={topologyData} />
                 </Suspense>
               </TabsContent>
 
-              <TabsContent value="heatmap">
-                <Suspense fallback={<div className="h-[400px] flex items-center justify-center">Loading 3D heatmap...</div>}>
-                  <GPU3DHeatmap data={heatmapData} />
+              {/* ── Heatmap ── */}
+              <TabsContent value="heatmap" className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-wrap text-xs">
+                    {[
+                      { icon: Activity, label: "Utilization", color: "text-blue-500" },
+                      { icon: Thermometer, label: "Temperature", color: "text-red-500" },
+                      { icon: Zap, label: "Power", color: "text-amber-500" },
+                      { icon: HardDrive, label: "Memory", color: "text-purple-500" },
+                    ].map((m) => {
+                      const Icon = m.icon;
+                      return (
+                        <div key={m.label} className="flex items-center gap-1">
+                          <Icon className={`h-3.5 w-3.5 ${m.color}`} />
+                          <span className="text-muted-foreground">{m.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <ToggleGroup
+                    type="single"
+                    value={String(heatmapHours)}
+                    onValueChange={(v) => {
+                      if (!v) return;
+                      setHeatmapHours(Number(v));
+                      setAdvancedDataLoaded(false);
+                    }}
+                    className="h-7"
+                  >
+                    {[2, 6, 12, 24].map((h) => (
+                      <ToggleGroupItem key={h} value={String(h)} className="text-xs px-2.5 h-7">
+                        {h}h
+                      </ToggleGroupItem>
+                    ))}
+                  </ToggleGroup>
+                </div>
+                <Suspense fallback={<VizLoading text="Loading heatmap..." />}>
+                  {heatmapData ? (
+                    <GPU3DHeatmap data={heatmapData} />
+                  ) : (
+                    <VizEmpty text="No heatmap data available. Data appears once hosts report historical metrics." />
+                  )}
                 </Suspense>
               </TabsContent>
 
-              <TabsContent value="timeline">
-                <Suspense fallback={<div className="h-[400px] flex items-center justify-center">Loading timeline visualization...</div>}>
-                  <AIWorkloadTimeline data={timelineData} />
+              {/* ── Timeline ── */}
+              <TabsContent value="timeline" className="space-y-3">
+                <div className="flex items-center gap-4 flex-wrap text-xs">
+                  {[
+                    { label: "Model Loading", color: "bg-blue-500", icon: Layers },
+                    { label: "Inference", color: "bg-emerald-500", icon: Brain },
+                    { label: "GPU Allocation", color: "bg-violet-500", icon: Cpu },
+                    { label: "Training", color: "bg-blue-400", icon: Cable },
+                  ].map((l) => {
+                    const Icon = l.icon;
+                    return (
+                      <div key={l.label} className="flex items-center gap-1.5">
+                        <div className={`w-2.5 h-2.5 rounded-sm ${l.color}`} />
+                        <Icon className="h-3 w-3 text-muted-foreground" />
+                        <span className="text-muted-foreground">{l.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <Suspense fallback={<VizLoading text="Loading timeline..." />}>
+                  {timelineData ? (
+                    <AIWorkloadTimeline data={timelineData} />
+                  ) : (
+                    <VizEmpty text="No timeline data. Workload events appear as Ollama processes requests." />
+                  )}
                 </Suspense>
               </TabsContent>
             </Tabs>
@@ -609,8 +717,30 @@ export default function Dashboard() {
             </TabsContent>
           ))}
 
+          {/* Alerts Tab */}
+          <TabsContent value="alerts" className="space-y-6">
+            <AlertsManager />
+          </TabsContent>
+
+          {/* GPU Health Events Tab */}
+          <TabsContent value="gpu-events" className="space-y-6">
+            {hostsData.length > 0 ? (
+              hostsData.map((host) => (
+                <div key={host.url} className="space-y-2">
+                  <h3 className="text-sm font-medium text-muted-foreground">{host.name} ({host.url})</h3>
+                  <GpuEventsPanel hostUrl={host.url} />
+                </div>
+              ))
+            ) : (
+              <GpuEventsPanel />
+            )}
+          </TabsContent>
+
           {/* Settings Tab */}
           <TabsContent value="settings" className="space-y-6">
+            {/* Dashboard Access */}
+            <DashboardAccessCard />
+
             {/* Global Settings */}
             <Card className="control-panel">
               <CardHeader>
@@ -681,6 +811,12 @@ export default function Dashboard() {
                 onHostStatusChange={() => {}} 
               />
             )}
+
+            {/* Exporter Configuration — auth, monitoring, network */}
+            {!demo && <ConfigPanel hosts={hosts} />}
+
+            {/* System Status — auth, persistence, features per host */}
+            {!demo && <SystemStatus hosts={hosts} />}
           </TabsContent>
         </Tabs>
       </main>
@@ -710,5 +846,143 @@ export default function Dashboard() {
         </div>
       </footer>
     </div>
+  );
+}
+
+function DashboardAccessCard() {
+  const { authEnabled, logout, setPassword, clearPassword } = useAuth();
+  const [newPass, setNewPass] = useState("");
+  const [confirmPass, setConfirmPass] = useState("");
+
+  const handleSetPassword = () => {
+    if (!newPass || newPass !== confirmPass) {
+      toast.error("Passwords do not match");
+      return;
+    }
+    setPassword(newPass);
+    setNewPass("");
+    setConfirmPass("");
+    toast.success("Dashboard password set");
+  };
+
+  const handleRemovePassword = () => {
+    clearPassword();
+    toast.success("Dashboard password removed — access is now open");
+  };
+
+  return (
+    <Card className="control-panel">
+      <CardHeader>
+        <CardTitle className="flex items-center justify-between">
+          <span className="flex items-center gap-2">
+            <Lock className="h-5 w-5" />
+            Dashboard Access
+          </span>
+          {authEnabled && (
+            <Button variant="outline" size="sm" onClick={logout} className="gap-1.5">
+              <LogOut className="h-3.5 w-3.5" />
+              Sign Out
+            </Button>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {authEnabled ? (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Dashboard is password-protected. You can change or remove the password below.
+            </p>
+            <div className="grid gap-3 md:grid-cols-3 items-end">
+              <div className="space-y-1">
+                <Label>New Password</Label>
+                <Input
+                  type="password"
+                  value={newPass}
+                  onChange={(e) => setNewPass(e.target.value)}
+                  placeholder="New password"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Confirm Password</Label>
+                <Input
+                  type="password"
+                  value={confirmPass}
+                  onChange={(e) => setConfirmPass(e.target.value)}
+                  placeholder="Confirm password"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleSetPassword}
+                  disabled={!newPass || !confirmPass}
+                >
+                  Change Password
+                </Button>
+                <Button variant="destructive" onClick={handleRemovePassword}>
+                  Remove
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              No password is set. Anyone with access to this URL can view the dashboard.
+              Set a password to require authentication.
+            </p>
+            <div className="grid gap-3 md:grid-cols-3 items-end">
+              <div className="space-y-1">
+                <Label>Password</Label>
+                <Input
+                  type="password"
+                  value={newPass}
+                  onChange={(e) => setNewPass(e.target.value)}
+                  placeholder="Choose a password"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Confirm Password</Label>
+                <Input
+                  type="password"
+                  value={confirmPass}
+                  onChange={(e) => setConfirmPass(e.target.value)}
+                  placeholder="Confirm password"
+                />
+              </div>
+              <Button
+                onClick={handleSetPassword}
+                disabled={!newPass || !confirmPass}
+              >
+                Set Password
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function VizLoading({ text }: { text: string }) {
+  return (
+    <Card>
+      <CardContent className="flex items-center justify-center py-20">
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">{text}</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function VizEmpty({ text }: { text: string }) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+        <BarChart3 className="h-8 w-8 mb-3 opacity-30" />
+        <p className="text-sm">{text}</p>
+      </CardContent>
+    </Card>
   );
 }

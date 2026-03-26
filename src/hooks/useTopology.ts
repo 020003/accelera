@@ -52,10 +52,8 @@ export function useTopology() {
   const [error, setError] = useState<string | null>(null);
 
   // Get backend hosts from environment or use defaults
-  const backendHosts = import.meta.env.VITE_BACKEND_HOSTS?.split(',') || [
-    'http://192.168.1.10:5000',
-    'http://192.168.1.11:5000',
-    'http://192.168.1.12:5000'
+  const backendHosts = import.meta.env.VITE_BACKEND_HOSTS?.split(',').filter(Boolean) || [
+    window.location.protocol + '//' + window.location.hostname + ':5000'
   ];
 
   const fetchTopology = async () => {

@@ -1,7 +1,19 @@
 #!/bin/bash
 
-# Backend hosts - Update these with your actual GPU server IPs
-HOSTS=("192.168.1.10" "192.168.1.11" "192.168.1.12")
+# Backend hosts — read from env var, .gpu-hosts file, or command-line args
+if [ $# -gt 0 ]; then
+    HOSTS=("$@")
+elif [ -n "${GPU_EXPORTER_HOSTS:-}" ]; then
+    IFS=',' read -ra HOSTS <<< "$GPU_EXPORTER_HOSTS"
+elif [ -f "$(dirname "$0")/.gpu-hosts" ]; then
+    mapfile -t HOSTS < <(grep -v '^\s*#' "$(dirname "$0")/.gpu-hosts" | grep -v '^\s*$')
+else
+    echo "ERROR: No hosts specified."
+    echo "Usage: $0 HOST1 HOST2 ..."
+    echo "   or: GPU_EXPORTER_HOSTS=host1,host2 $0"
+    echo "   or: create a .gpu-hosts file (one host per line)"
+    exit 1
+fi
 
 # Colors for output
 RED='\033[0;31m'

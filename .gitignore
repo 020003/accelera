@@ -38,6 +38,7 @@ __pycache__/
 *.so
 .Python
 server/hosts.json
+server/data/
 
 # Logs
 *.log
@@ -51,3 +52,5 @@ logs/
 # Local deployment and configuration files with IPs
 DEPLOYMENT_STATUS.md
 add_hosts.sh
+.gpu-hosts
+docs/screenshots/capture.cjs

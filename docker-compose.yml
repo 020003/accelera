@@ -4,26 +4,34 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
       - HOST=0.0.0.0
       - VITE_PORT=8080
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:5000}
+      - VITE_BACKEND_HOSTS=${VITE_BACKEND_HOSTS:-http://localhost:5000}
     volumes:
       - .:/app
       - /app/node_modules
-    network_mode: bridge
 
   gpu-exporter:
     build:
       context: ./server
+    restart: unless-stopped
     ports:
       - "5000:5000"
     environment:
       - FLASK_ENV=production
+      - FLASK_HOST=0.0.0.0
+      - FLASK_PORT=5000
+      - CORS_ORIGINS=*
+      - PROMETHEUS_ENABLED=true
+      - GPU_COLLECT_INTERVAL=60
+      - LOG_LEVEL=INFO
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-    # Ensure GPUs are accessible in non-Swarm Docker Compose
     deploy:
       resources:
         reservations:
@@ -31,9 +39,11 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
-    # Share host PID namespace so nvidia-smi/NVML can see host processes
     pid: "host"
-    # Additional privileges for process detection
     privileged: true
     volumes:
       - /proc:/host/proc:ro
+      - accelera-data:/app/data
+
+volumes:
+  accelera-data:
