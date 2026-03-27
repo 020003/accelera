@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+*.md
+.env
+.env.*
+server/
+docker-compose*.yml
+deploy-*.sh
+.gpu-hosts
+docs/

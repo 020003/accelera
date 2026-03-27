@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { proxyUrl } from "@/lib/proxy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -104,7 +105,7 @@ export function OllamaHostManager({ hosts, setHosts, onHostStatusChange }: Ollam
     setTestingHost(url);
     
     try {
-      const response = await fetch(`${url}/api/tags`);
+      const response = await fetch(proxyUrl(`${url}/api/tags`));
       if (response.ok) {
         const data = await response.json();
         if (data.models) {

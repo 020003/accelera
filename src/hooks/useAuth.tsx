@@ -1,7 +1,7 @@
 /**
  * Frontend dashboard authentication.
  *
- * - Password is stored in localStorage (set via Settings tab).
+ * - Password hash (SHA-256) is stored in localStorage.
  * - Session lives in sessionStorage (cleared when the browser tab closes).
  * - When no password is configured, auth is disabled and the dashboard
  *   is accessible to everyone.
@@ -24,11 +24,11 @@ interface AuthContextValue {
   /** True when the user has entered the correct password this session */
   isAuthenticated: boolean;
   /** Attempt login – returns true on success */
-  login: (password: string) => boolean;
+  login: (password: string) => Promise<boolean>;
   /** End the session */
   logout: () => void;
   /** Set (or clear) the dashboard password */
-  setPassword: (password: string) => void;
+  setPassword: (password: string) => Promise<void>;
   /** Remove the password entirely (disables auth) */
   clearPassword: () => void;
 }
@@ -47,8 +47,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAuthenticated = !authEnabled || session;
 
   const login = useCallback(
-    (password: string): boolean => {
-      if (_hash(password) === passwordHash) {
+    async (password: string): Promise<boolean> => {
+      const h = await _sha256(password);
+
+      // Support legacy DJB2 hashes (prefix "h:") — auto-upgrade on match
+      if (passwordHash.startsWith("h:") && _legacyHash(password) === passwordHash) {
+        localStorage.setItem(PASSWORD_KEY, h);
+        setPasswordHash(h);
+        sessionStorage.setItem(SESSION_KEY, "1");
+        setSession(true);
+        return true;
+      }
+
+      if (h === passwordHash) {
         sessionStorage.setItem(SESSION_KEY, "1");
         setSession(true);
         return true;
@@ -63,7 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(false);
   }, []);
 
-  const setPassword = useCallback((password: string) => {
+  const setPassword = useCallback(async (password: string) => {
     if (!password) {
       localStorage.removeItem(PASSWORD_KEY);
       setPasswordHash("");
@@ -71,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(false);
       return;
     }
-    const h = _hash(password);
+    const h = await _sha256(password);
     localStorage.setItem(PASSWORD_KEY, h);
     setPasswordHash(h);
     // Auto-authenticate the person who just set the password
@@ -101,8 +112,18 @@ export function useAuth(): AuthContextValue {
   return ctx;
 }
 
-/** Simple hash so we never store the raw password in localStorage. */
-function _hash(s: string): string {
+/** SHA-256 hash via Web Crypto API — returns hex string prefixed with "sha256:". */
+async function _sha256(s: string): Promise<string> {
+  const data = new TextEncoder().encode(s);
+  const buf = await crypto.subtle.digest("SHA-256", data);
+  const hex = Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return "sha256:" + hex;
+}
+
+/** Legacy DJB2 hash — only used to verify old stored hashes for migration. */
+function _legacyHash(s: string): string {
   let h = 0;
   for (let i = 0; i < s.length; i++) {
     h = ((h << 5) - h + s.charCodeAt(i)) | 0;

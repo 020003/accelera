@@ -1,10 +1,11 @@
 import { useState } from "react";
+import { proxyUrl } from "@/lib/proxy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Plus, X, Server, Wifi, WifiOff, Loader2 } from "lucide-react";
+import { Plus, X, Server, Wifi, WifiOff, Loader2, Bot, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 interface Host {
@@ -13,13 +14,19 @@ interface Host {
   isConnected: boolean;
 }
 
+interface HostAiInfo {
+  ollama?: { isAvailable: boolean; models: any[] };
+  sglang?: { isAvailable: boolean; models: any[] };
+}
+
 interface HostManagerProps {
   hosts: Host[];
   setHosts: (hosts: Host[]) => void;
   onHostStatusChange: (url: string, isConnected: boolean) => void;
+  hostsAiInfo?: Record<string, HostAiInfo>;
 }
 
-export function HostManager({ hosts, setHosts, onHostStatusChange }: HostManagerProps) {
+export function HostManager({ hosts, setHosts, onHostStatusChange, hostsAiInfo }: HostManagerProps) {
   const [newHostUrl, setNewHostUrl] = useState("");
   const [newHostName, setNewHostName] = useState("");
   const [isAdding, setIsAdding] = useState(false);
@@ -53,7 +60,7 @@ export function HostManager({ hosts, setHosts, onHostStatusChange }: HostManager
       // Try to add to backend first if available
       const apiUrl = import.meta.env.VITE_API_URL || window.location.origin;
       try {
-        const response = await fetch(`${apiUrl}/api/hosts`, {
+        const response = await fetch(proxyUrl(`${apiUrl}/api/hosts`), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -103,7 +110,7 @@ export function HostManager({ hosts, setHosts, onHostStatusChange }: HostManager
       const apiUrl = import.meta.env.VITE_API_URL || window.location.origin;
       try {
         const encodedUrl = encodeURIComponent(url);
-        const response = await fetch(`${apiUrl}/api/hosts/${encodedUrl}`, {
+        const response = await fetch(proxyUrl(`${apiUrl}/api/hosts/${encodedUrl}`), {
           method: 'DELETE',
         });
         
@@ -140,7 +147,7 @@ export function HostManager({ hosts, setHosts, onHostStatusChange }: HostManager
 
   const testHostConnection = async (url: string) => {
     try {
-      const response = await fetch(url);
+      const response = await fetch(proxyUrl(url));
       if (response.ok) {
         const data = await response.json();
         if (data.gpus) {
@@ -225,6 +232,18 @@ export function HostManager({ hosts, setHosts, onHostStatusChange }: HostManager
                     <Badge variant={host.isConnected ? "default" : "secondary"}>
                       {host.isConnected ? "Connected" : "Disconnected"}
                     </Badge>
+                    {hostsAiInfo?.[host.url]?.ollama?.isAvailable && (
+                      <Badge variant="secondary" className="gap-1 text-[10px] h-5">
+                        <Bot className="h-3 w-3" />
+                        Ollama · {hostsAiInfo[host.url].ollama!.models.length}
+                      </Badge>
+                    )}
+                    {hostsAiInfo?.[host.url]?.sglang?.isAvailable && (
+                      <Badge variant="secondary" className="gap-1 text-[10px] h-5 bg-cyan-500/10 text-cyan-400">
+                        <Sparkles className="h-3 w-3" />
+                        SGLang · {hostsAiInfo[host.url].sglang!.models.length}
+                      </Badge>
+                    )}
                   </div>
                   <Button
                     variant="ghost"

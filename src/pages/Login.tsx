@@ -12,9 +12,9 @@ export default function Login() {
   const [error, setError] = useState(false);
   const [shake, setShake] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (login(password)) {
+    if (await login(password)) {
       setError(false);
     } else {
       setError(true);

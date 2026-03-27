@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import Plot from 'react-plotly.js';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -52,6 +52,17 @@ const metricConfig: Record<MetricType, {
 export function GPU3DHeatmap({ data }: { data?: HeatmapData }) {
   const [selectedMetric, setSelectedMetric] = useState<MetricType>('utilization');
   const [plotData, setPlotData] = useState<any[]>([]);
+  const isLight = useMemo(() => document.documentElement.classList.contains('light'), []);
+  const [themeLight, setThemeLight] = useState(isLight);
+
+  // Watch for theme changes
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setThemeLight(document.documentElement.classList.contains('light'));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
   
   // Generate demo data if none provided
   const generateDemoData = (): HeatmapData => {
@@ -127,25 +138,33 @@ export function GPU3DHeatmap({ data }: { data?: HeatmapData }) {
     setPlotData([surface]);
   }, [selectedMetric, data]);
   
+  const fontColor = themeLight ? '#1e293b' : '#e2e8f0';
+  const gridColor = themeLight ? 'rgba(100,116,139,0.18)' : 'rgba(148,163,184,0.15)';
+  const sceneBg = themeLight ? '#f8fafc' : 'rgba(11,18,32,0.6)';
+
   const layout = {
     title: {
       text: `GPU Cluster ${metricConfig[selectedMetric].label} Over Time`,
-      font: { size: 16 },
+      font: { size: 16, color: fontColor },
     },
     scene: {
       xaxis: {
-        title: 'Time',
+        title: { text: 'Time', font: { color: fontColor } },
         tickangle: -45,
-        gridcolor: 'rgba(128, 128, 128, 0.2)',
+        tickfont: { color: fontColor },
+        gridcolor: gridColor,
       },
       yaxis: {
-        title: 'Host',
-        gridcolor: 'rgba(128, 128, 128, 0.2)',
+        title: { text: 'Host', font: { color: fontColor } },
+        tickfont: { color: fontColor },
+        gridcolor: gridColor,
       },
       zaxis: {
-        title: metricConfig[selectedMetric].label,
-        gridcolor: 'rgba(128, 128, 128, 0.2)',
+        title: { text: metricConfig[selectedMetric].label, font: { color: fontColor } },
+        tickfont: { color: fontColor },
+        gridcolor: gridColor,
       },
+      bgcolor: sceneBg,
       camera: {
         eye: { x: 1.5, y: 1.5, z: 1.5 },
         center: { x: 0, y: 0, z: 0 },

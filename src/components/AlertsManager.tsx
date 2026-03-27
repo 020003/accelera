@@ -20,14 +20,20 @@ import {
 } from "@/hooks/useAlerts";
 import type { AlertRule, AlertMetric, AlertComparison } from "@/types/alerts";
 
-const METRIC_OPTIONS: { value: AlertMetric; label: string }[] = [
-  { value: "utilization", label: "GPU Utilization (%)" },
-  { value: "temperature", label: "Temperature (°C)" },
-  { value: "power_draw", label: "Power Draw (W)" },
-  { value: "memory_percent", label: "Memory Usage (%)" },
-  { value: "memory_used", label: "Memory Used (MiB)" },
-  { value: "fan", label: "Fan Speed (%)" },
+const METRIC_OPTIONS: { value: AlertMetric; label: string; group: string }[] = [
+  { value: "utilization", label: "GPU Utilization (%)", group: "GPU" },
+  { value: "temperature", label: "Temperature (°C)", group: "GPU" },
+  { value: "power_draw", label: "Power Draw (W)", group: "GPU" },
+  { value: "memory_percent", label: "Memory Usage (%)", group: "GPU" },
+  { value: "memory_used", label: "Memory Used (MiB)", group: "GPU" },
+  { value: "fan", label: "Fan Speed (%)", group: "GPU" },
+  { value: "tps", label: "Tokens per Second (TPS)", group: "AI / Tokens" },
+  { value: "total_tokens", label: "Total Tokens (1h window)", group: "AI / Tokens" },
+  { value: "token_request_count", label: "Request Count (1h window)", group: "AI / Tokens" },
+  { value: "avg_latency_sec", label: "Avg Latency (seconds)", group: "AI / Tokens" },
 ];
+
+const TOKEN_METRICS = new Set(["tps", "total_tokens", "token_request_count", "avg_latency_sec"]);
 
 const COMPARISON_OPTIONS: { value: AlertComparison; label: string }[] = [
   { value: ">", label: "Greater than" },
@@ -169,10 +175,18 @@ export function AlertsManager() {
                 <div className="grid grid-cols-3 gap-2">
                   <div>
                     <Label>Metric</Label>
-                    <Select value={formMetric} onValueChange={(v) => setFormMetric(v as AlertMetric)}>
+                    <Select value={formMetric} onValueChange={(v) => {
+                      setFormMetric(v as AlertMetric);
+                      if (TOKEN_METRICS.has(v)) setFormGpuFilter("*");
+                    }}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {METRIC_OPTIONS.map((o) => (
+                        <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">GPU Metrics</div>
+                        {METRIC_OPTIONS.filter(o => o.group === "GPU").map((o) => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                        <div className="px-2 py-1 mt-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-t">AI / Token Metrics</div>
+                        {METRIC_OPTIONS.filter(o => o.group === "AI / Tokens").map((o) => (
                           <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                         ))}
                       </SelectContent>
@@ -202,7 +216,12 @@ export function AlertsManager() {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <Label>GPU Filter (* = all)</Label>
-                    <Input value={formGpuFilter} onChange={(e) => setFormGpuFilter(e.target.value)} />
+                    <Input
+                      value={formGpuFilter}
+                      onChange={(e) => setFormGpuFilter(e.target.value)}
+                      disabled={TOKEN_METRICS.has(formMetric)}
+                      placeholder={TOKEN_METRICS.has(formMetric) ? "N/A (fleet-level)" : "*"}
+                    />
                   </div>
                   <div>
                     <Label>Cooldown (seconds)</Label>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { proxyUrl } from '@/lib/proxy';
 
 interface GPUConnection {
   target: string;
@@ -64,7 +65,7 @@ export function useTopology() {
       // Fetch topology from all hosts in parallel
       const promises = backendHosts.map(async (host) => {
         try {
-          const response = await fetch(`${host}/api/topology`);
+          const response = await fetch(proxyUrl(`${host}/api/topology`));
           if (!response.ok) throw new Error(`Failed to fetch from ${host}`);
           const data = await response.json();
           return data;

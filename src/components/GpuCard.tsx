@@ -16,6 +16,7 @@ import {
 interface GpuCardProps {
   gpu: GpuInfo;
   energyRate?: number;
+  currencySymbol?: string;
 }
 
 function getStatusColor(value: number, type: 'temp' | 'util' | 'memory'): string {
@@ -44,7 +45,7 @@ function getProgressVariant(value: number, type: 'temp' | 'util' | 'memory'): 'n
   return 'normal';
 }
 
-export const GpuCard = memo(function GpuCard({ gpu, energyRate = 0 }: GpuCardProps) {
+export const GpuCard = memo(function GpuCard({ gpu, energyRate = 0, currencySymbol = "$" }: GpuCardProps) {
   const memoryUsedPercent = Math.round((gpu.memory.used / gpu.memory.total) * 100);
   const powerUsedPercent = Math.round((gpu.power.draw / gpu.power.limit) * 100);
   const hourlyEnergyCost = energyRate > 0 ? (gpu.power.draw / 1000) * energyRate : 0;
@@ -129,7 +130,7 @@ export const GpuCard = memo(function GpuCard({ gpu, energyRate = 0 }: GpuCardPro
               </div>
               {hourlyEnergyCost > 0 && (
                 <div className="text-xs text-emerald font-medium">
-                  ${hourlyEnergyCost.toFixed(3)}/hr
+                  {currencySymbol}{hourlyEnergyCost.toFixed(3)}/hr
                 </div>
               )}
             </div>

@@ -1,17 +1,16 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { proxyUrl } from "@/lib/proxy";
 import { Helmet } from "react-helmet-async";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { GPUTopologyMap } from "@/components/GPUTopologyMap";
 import { GPU3DHeatmap } from "@/components/GPU3DHeatmap";
-import { AIWorkloadTimeline } from "@/components/AIWorkloadTimeline";
 import {
   NetworkIcon,
   BarChart3,
-  Clock,
   ArrowLeft,
   RefreshCw,
   Server,
@@ -20,13 +19,12 @@ import {
   Zap,
   HardDrive,
   Loader2,
-  Layers,
-  Brain,
-  Cpu,
-  Cable,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useTopology } from "@/hooks/useTopology";
+import { useTheme } from "@/hooks/useTheme";
 
 interface Host {
   url: string;
@@ -63,6 +61,7 @@ function Spinner({ className = "" }: { className?: string }) {
 
 export default function AdvancedVisualizations() {
   const hosts = useMemo(getHosts, []);
+  const { theme, toggle: toggleTheme } = useTheme();
   const {
     data: topologyData,
     loading: topologyLoading,
@@ -70,9 +69,7 @@ export default function AdvancedVisualizations() {
   } = useTopology();
 
   const [heatmapData, setHeatmapData] = useState<any>(null);
-  const [timelineData, setTimelineData] = useState<any>(null);
   const [heatmapLoading, setHeatmapLoading] = useState(false);
-  const [timelineLoading, setTimelineLoading] = useState(false);
   const [heatmapHours, setHeatmapHours] = useState(6);
   const [activeTab, setActiveTab] = useState("topology");
 
@@ -86,7 +83,7 @@ export default function AdvancedVisualizations() {
       const results = await Promise.allSettled(
         hosts.map((h) =>
           fetch(
-            `${baseUrl(h.url)}/api/heatmap?metric=utilization&hours=${heatmapHours}`,
+            proxyUrl(`${baseUrl(h.url)}/api/heatmap?metric=utilization&hours=${heatmapHours}`),
             { signal: ctrl.signal }
           ).then((r) => (r.ok ? r.json() : null))
         )
@@ -116,52 +113,10 @@ export default function AdvancedVisualizations() {
     setHeatmapLoading(false);
   }, [hosts, heatmapHours]);
 
-  // Fetch timeline from all hosts and merge
-  const fetchTimeline = useCallback(async () => {
-    if (hosts.length === 0) return;
-    setTimelineLoading(true);
-    try {
-      const ctrl = new AbortController();
-      const timeout = setTimeout(() => ctrl.abort(), 8000);
-      const results = await Promise.allSettled(
-        hosts.map((h) =>
-          fetch(`${baseUrl(h.url)}/api/timeline`, { signal: ctrl.signal }).then(
-            (r) => (r.ok ? r.json() : null)
-          )
-        )
-      );
-      clearTimeout(timeout);
-      const valid = results
-        .filter(
-          (r): r is PromiseFulfilledResult<any> =>
-            r.status === "fulfilled" && r.value?.events
-        )
-        .map((r) => r.value);
-      if (valid.length > 0) {
-        const allEvents = valid.flatMap((v: any, idx: number) =>
-          v.events.map((e: any) => ({ ...e, id: `h${idx}-${e.id}` }))
-        );
-        setTimelineData({
-          events: allEvents,
-          hosts: [
-            ...new Set(
-              valid.flatMap((v: any) =>
-                v.events.map((e: any) => e.host)
-              )
-            ),
-          ],
-        });
-      }
-    } catch {
-      /* ignore */
-    }
-    setTimelineLoading(false);
-  }, [hosts]);
 
   // Lazy-load data when tab becomes active
   useEffect(() => {
     if (activeTab === "heatmap" && !heatmapData) fetchHeatmap();
-    if (activeTab === "timeline" && !timelineData) fetchTimeline();
   }, [activeTab]);
 
   // Re-fetch heatmap when hours change
@@ -174,13 +129,11 @@ export default function AdvancedVisualizations() {
       /* topology hook auto-refreshes */
     }
     if (activeTab === "heatmap") fetchHeatmap();
-    if (activeTab === "timeline") fetchTimeline();
   };
 
   const isCurrentLoading =
     (activeTab === "topology" && topologyLoading) ||
-    (activeTab === "heatmap" && heatmapLoading) ||
-    (activeTab === "timeline" && timelineLoading);
+    (activeTab === "heatmap" && heatmapLoading);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -188,8 +141,8 @@ export default function AdvancedVisualizations() {
         <title>Advanced Visualizations - Accelera</title>
       </Helmet>
 
-      {/* ── Compact header ── */}
-      <header className="border-b bg-card/50 sticky top-0 z-30 backdrop-blur-sm">
+      {/* ── Header ── */}
+      <header className="border-b bg-card/60 backdrop-blur-md sticky top-0 z-30">
         <div className="container mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link to="/">
@@ -199,65 +152,76 @@ export default function AdvancedVisualizations() {
               </Button>
             </Link>
             <div className="h-5 w-px bg-border" />
-            <h1 className="text-sm font-semibold">Advanced Visualizations</h1>
+            <h1 className="text-sm font-semibold tracking-tight">Advanced Visualizations</h1>
             <Badge variant="secondary" className="text-[10px] h-5 gap-1">
               <Server className="h-3 w-3" />
               {hosts.length} host{hosts.length !== 1 ? "s" : ""}
             </Badge>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 gap-1.5"
-            onClick={handleRefresh}
-            disabled={isCurrentLoading}
-          >
-            <RefreshCw
-              className={`h-3.5 w-3.5 ${isCurrentLoading ? "animate-spin" : ""}`}
-            />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={toggleTheme}
+              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5"
+              onClick={handleRefresh}
+              disabled={isCurrentLoading}
+            >
+              <RefreshCw
+                className={`h-3.5 w-3.5 ${isCurrentLoading ? "animate-spin" : ""}`}
+              />
+              Refresh
+            </Button>
+          </div>
         </div>
       </header>
 
       {/* ── Main ── */}
-      <main className="flex-1 container mx-auto px-4 py-4 space-y-4">
+      <main className="flex-1 container mx-auto px-4 py-6 space-y-5">
         <Tabs
           value={activeTab}
           onValueChange={setActiveTab}
-          className="space-y-4"
+          className="space-y-5"
         >
-          <TabsList>
-            <TabsTrigger value="topology" className="gap-1.5 text-xs">
-              <NetworkIcon className="h-3.5 w-3.5" />
+          <TabsList className="h-10">
+            <TabsTrigger value="topology" className="gap-2 text-sm px-4">
+              <NetworkIcon className="h-4 w-4" />
               GPU Topology
             </TabsTrigger>
-            <TabsTrigger value="heatmap" className="gap-1.5 text-xs">
-              <BarChart3 className="h-3.5 w-3.5" />
+            <TabsTrigger value="heatmap" className="gap-2 text-sm px-4">
+              <BarChart3 className="h-4 w-4" />
               Cluster Heatmap
-            </TabsTrigger>
-            <TabsTrigger value="timeline" className="gap-1.5 text-xs">
-              <Clock className="h-3.5 w-3.5" />
-              Workload Timeline
             </TabsTrigger>
           </TabsList>
 
           {/* ───── Topology ───── */}
-          <TabsContent value="topology" className="space-y-3">
-            {/* Compact legend */}
-            <div className="flex items-center gap-3 flex-wrap">
-              {[
-                { label: "NVLink", color: "bg-green-500", desc: "High speed" },
-                { label: "SXM", color: "bg-amber-500", desc: "Ultra high speed" },
-                { label: "PCIe", color: "bg-indigo-500", desc: "Standard" },
-              ].map((l) => (
-                <div key={l.label} className="flex items-center gap-1.5 text-xs">
-                  <div className={`w-2.5 h-2.5 rounded-full ${l.color}`} />
-                  <span className="font-medium">{l.label}</span>
-                  <span className="text-muted-foreground">{l.desc}</span>
+          <TabsContent value="topology" className="space-y-4">
+            <Card className="border-dashed">
+              <CardContent className="py-3 px-4">
+                <div className="flex items-center gap-5 flex-wrap">
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Legend</span>
+                  {[
+                    { label: "NVLink", color: "bg-green-500", desc: "High speed" },
+                    { label: "SXM", color: "bg-amber-500", desc: "Ultra high speed" },
+                    { label: "PCIe", color: "bg-indigo-500", desc: "Standard" },
+                  ].map((l) => (
+                    <div key={l.label} className="flex items-center gap-1.5 text-xs">
+                      <div className={`w-2.5 h-2.5 rounded-full ${l.color} shadow-sm`} />
+                      <span className="font-medium text-foreground">{l.label}</span>
+                      <span className="text-muted-foreground">{l.desc}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </CardContent>
+            </Card>
 
             {topologyLoading ? (
               <LoadingPlaceholder text="Loading GPU topology..." />
@@ -269,42 +233,46 @@ export default function AdvancedVisualizations() {
           </TabsContent>
 
           {/* ───── Heatmap ───── */}
-          <TabsContent value="heatmap" className="space-y-3">
-            {/* Controls */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3 flex-wrap text-xs">
-                {[
-                  { icon: Activity, label: "Utilization", color: "text-blue-500" },
-                  { icon: Thermometer, label: "Temperature", color: "text-red-500" },
-                  { icon: Zap, label: "Power", color: "text-amber-500" },
-                  { icon: HardDrive, label: "Memory", color: "text-purple-500" },
-                ].map((m) => {
-                  const Icon = m.icon;
-                  return (
-                    <div key={m.label} className="flex items-center gap-1">
-                      <Icon className={`h-3.5 w-3.5 ${m.color}`} />
-                      <span className="text-muted-foreground">{m.label}</span>
-                    </div>
-                  );
-                })}
-              </div>
-              <ToggleGroup
-                type="single"
-                value={String(heatmapHours)}
-                onValueChange={(v) => v && setHeatmapHours(Number(v))}
-                className="h-7"
-              >
-                {HEATMAP_HOURS.map((r) => (
-                  <ToggleGroupItem
-                    key={r.hours}
-                    value={String(r.hours)}
-                    className="text-xs px-2.5 h-7"
+          <TabsContent value="heatmap" className="space-y-4">
+            <Card className="border-dashed">
+              <CardContent className="py-3 px-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-5 flex-wrap">
+                    <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Metrics</span>
+                    {[
+                      { icon: Activity, label: "Utilization", color: "text-blue-500" },
+                      { icon: Thermometer, label: "Temperature", color: "text-red-500" },
+                      { icon: Zap, label: "Power", color: "text-amber-500" },
+                      { icon: HardDrive, label: "Memory", color: "text-purple-500" },
+                    ].map((m) => {
+                      const Icon = m.icon;
+                      return (
+                        <div key={m.label} className="flex items-center gap-1.5 text-xs">
+                          <Icon className={`h-3.5 w-3.5 ${m.color}`} />
+                          <span className="text-foreground">{m.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <ToggleGroup
+                    type="single"
+                    value={String(heatmapHours)}
+                    onValueChange={(v) => v && setHeatmapHours(Number(v))}
+                    className="h-8"
                   >
-                    {r.label}
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
-            </div>
+                    {HEATMAP_HOURS.map((r) => (
+                      <ToggleGroupItem
+                        key={r.hours}
+                        value={String(r.hours)}
+                        className="text-xs px-3 h-8"
+                      >
+                        {r.label}
+                      </ToggleGroupItem>
+                    ))}
+                  </ToggleGroup>
+                </div>
+              </CardContent>
+            </Card>
 
             {heatmapLoading ? (
               <LoadingPlaceholder text="Loading heatmap data..." />
@@ -315,35 +283,7 @@ export default function AdvancedVisualizations() {
             )}
           </TabsContent>
 
-          {/* ───── Timeline ───── */}
-          <TabsContent value="timeline" className="space-y-3">
-            {/* Compact legend */}
-            <div className="flex items-center gap-4 flex-wrap text-xs">
-              {[
-                { label: "Model Loading", color: "bg-blue-500", icon: Layers },
-                { label: "Inference", color: "bg-emerald-500", icon: Brain },
-                { label: "GPU Allocation", color: "bg-violet-500", icon: Cpu },
-                { label: "Training", color: "bg-blue-400", icon: Cable },
-              ].map((l) => {
-                const Icon = l.icon;
-                return (
-                  <div key={l.label} className="flex items-center gap-1.5">
-                    <div className={`w-2.5 h-2.5 rounded-sm ${l.color}`} />
-                    <Icon className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-muted-foreground">{l.label}</span>
-                  </div>
-                );
-              })}
-            </div>
 
-            {timelineLoading ? (
-              <LoadingPlaceholder text="Loading timeline data..." />
-            ) : !timelineData ? (
-              <ErrorPlaceholder text="No timeline data available. Workload events appear as Ollama processes requests." />
-            ) : (
-              <AIWorkloadTimeline data={timelineData} />
-            )}
-          </TabsContent>
         </Tabs>
       </main>
     </div>
@@ -353,11 +293,12 @@ export default function AdvancedVisualizations() {
 function LoadingPlaceholder({ text }: { text: string }) {
   return (
     <Card>
-      <CardContent className="flex items-center justify-center py-20">
-        <div className="flex items-center gap-3 text-muted-foreground">
-          <Spinner className="h-5 w-5" />
-          <span className="text-sm">{text}</span>
+      <CardContent className="flex flex-col items-center justify-center py-24 gap-4">
+        <div className="relative">
+          <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping" />
+          <Spinner className="h-6 w-6 text-primary relative" />
         </div>
+        <span className="text-sm text-muted-foreground">{text}</span>
       </CardContent>
     </Card>
   );
@@ -366,9 +307,11 @@ function LoadingPlaceholder({ text }: { text: string }) {
 function ErrorPlaceholder({ text }: { text: string }) {
   return (
     <Card>
-      <CardContent className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-        <BarChart3 className="h-8 w-8 mb-3 opacity-30" />
-        <p className="text-sm">{text}</p>
+      <CardContent className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
+        <div className="rounded-full p-4 bg-muted/50">
+          <BarChart3 className="h-8 w-8 opacity-40" />
+        </div>
+        <p className="text-sm max-w-md text-center">{text}</p>
       </CardContent>
     </Card>
   );

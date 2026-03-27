@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { proxyUrl } from '@/lib/proxy';
 import type { 
   OllamaModel, 
   OllamaModelInfo, 
@@ -24,7 +25,7 @@ export function useOllama({ hosts, refreshInterval = 5000, enabled = true }: Use
 
   // Fetch models from an Ollama instance
   const fetchModels = async (hostUrl: string): Promise<OllamaModel[]> => {
-    const response = await fetch(`${hostUrl}/api/tags`);
+    const response = await fetch(proxyUrl(`${hostUrl}/api/tags`));
     if (!response.ok) {
       throw new Error(`Failed to fetch models: ${response.status}`);
     }
@@ -34,7 +35,7 @@ export function useOllama({ hosts, refreshInterval = 5000, enabled = true }: Use
 
   // Fetch model info
   const fetchModelInfo = async (hostUrl: string, modelName: string): Promise<OllamaModelInfo> => {
-    const response = await fetch(`${hostUrl}/api/show`, {
+    const response = await fetch(proxyUrl(`${hostUrl}/api/show`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: modelName })
@@ -54,7 +55,7 @@ export function useOllama({ hosts, refreshInterval = 5000, enabled = true }: Use
     const startTime = Date.now();
     
     try {
-      const response = await fetch(`${hostUrl}/api/generate`, {
+      const response = await fetch(proxyUrl(`${hostUrl}/api/generate`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

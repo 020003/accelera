@@ -102,12 +102,71 @@ def _extract_metric(gpu: dict, metric: str) -> float | None:
     return mapping.get(metric)
 
 
+_TOKEN_METRICS = frozenset({
+    "tps", "total_tokens", "token_request_count", "avg_latency_sec",
+})
+
+
+def _extract_token_metric(metric: str) -> float | None:
+    """Read the latest token stats from storage and return the requested metric."""
+    try:
+        stats = storage.get_token_stats(hours=1)
+        summary = stats.get("summary", {})
+        mapping = {
+            "tps": summary.get("current_tps", 0.0),
+            "total_tokens": float(summary.get("total_tokens", 0)),
+            "token_request_count": float(summary.get("total_requests", 0)),
+            "avg_latency_sec": (
+                summary.get("total_duration_sec", 0.0) / summary["total_requests"]
+                if summary.get("total_requests")
+                else 0.0
+            ),
+        }
+        return mapping.get(metric)
+    except Exception:
+        return None
+
+
+def _fire_alert(rule: dict, value: float, now: float, gpu_id: str | None = None, label: str = ""):
+    """Record alert event, update cooldown, and dispatch notifications."""
+    rule_id = rule["id"]
+    metric = rule["metric"]
+    message = f"[Accelera Alert] {rule['name']}: {label}{metric}={value} {rule['comparison']} {rule['threshold']}"
+
+    severity = "critical" if metric in ("temperature", "tps") else "warning"
+    event = {
+        "rule_id": rule_id,
+        "rule_name": rule["name"],
+        "metric": metric,
+        "value": value,
+        "threshold": rule["threshold"],
+        "gpu_id": gpu_id,
+        "host": rule.get("host_filter", "*"),
+        "message": message,
+        "severity": severity,
+        "created_at": now,
+    }
+    storage.save_alert_event(event)
+
+    with _fire_lock:
+        _last_fired[rule_id] = now
+
+    if rule.get("notify_webhook"):
+        threading.Thread(target=_send_webhook, args=(event,), daemon=True).start()
+    if rule.get("notify_email"):
+        threading.Thread(
+            target=_send_email,
+            args=(f"Accelera Alert: {rule['name']}", message),
+            daemon=True,
+        ).start()
+
+
 def evaluate_alerts():
-    """Run all enabled alert rules against current GPU state. Called periodically."""
+    """Run all enabled alert rules against current GPU state and token metrics. Called periodically."""
     try:
         gpus = get_gpus()
     except Exception:
-        return
+        gpus = []
 
     rules = storage.load_alert_rules()
     now = time.time()
@@ -123,48 +182,34 @@ def evaluate_alerts():
             if rule_id in _last_fired and (now - _last_fired[rule_id]) < cooldown:
                 continue
 
+        metric = rule["metric"]
+
+        # ── Token-based metrics (fleet-level, not per-GPU) ──
+        if metric in _TOKEN_METRICS:
+            value = _extract_token_metric(metric)
+            if value is None:
+                continue
+            if _compare(value, rule["threshold"], rule["comparison"]):
+                _fire_alert(rule, value, now, label="Fleet ")
+            continue
+
+        # ── GPU-based metrics (per-GPU) ──
         for gpu in gpus:
             gpu_id_str = str(gpu["id"])
             gpu_filter = rule.get("gpu_filter", "*")
             if gpu_filter != "*" and gpu_id_str != gpu_filter:
                 continue
 
-            value = _extract_metric(gpu, rule["metric"])
+            value = _extract_metric(gpu, metric)
             if value is None:
                 continue
 
             if _compare(value, rule["threshold"], rule["comparison"]):
-                message = (
-                    f"[Accelera Alert] {rule['name']}: GPU {gpu['id']} ({gpu['name']}) "
-                    f"{rule['metric']}={value} {rule['comparison']} {rule['threshold']}"
+                _fire_alert(
+                    rule, value, now,
+                    gpu_id=gpu_id_str,
+                    label=f"GPU {gpu['id']} ({gpu['name']}) ",
                 )
-
-                event = {
-                    "rule_id": rule_id,
-                    "rule_name": rule["name"],
-                    "metric": rule["metric"],
-                    "value": value,
-                    "threshold": rule["threshold"],
-                    "gpu_id": gpu_id_str,
-                    "host": rule.get("host_filter", "*"),
-                    "message": message,
-                    "severity": "critical" if rule["metric"] == "temperature" else "warning",
-                    "created_at": now,
-                }
-                storage.save_alert_event(event)
-
-                with _fire_lock:
-                    _last_fired[rule_id] = now
-
-                # Notifications
-                if rule.get("notify_webhook"):
-                    threading.Thread(target=_send_webhook, args=(event,), daemon=True).start()
-                if rule.get("notify_email"):
-                    threading.Thread(
-                        target=_send_email,
-                        args=(f"Accelera Alert: {rule['name']}", message),
-                        daemon=True,
-                    ).start()
 
 
 # -------------------------------------------------------------------

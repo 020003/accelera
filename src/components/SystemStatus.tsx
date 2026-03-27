@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { proxyUrl } from "@/lib/proxy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -10,6 +11,8 @@ import {
   RefreshCw,
   Server,
   HardDrive,
+  Bot,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -29,6 +32,8 @@ interface HostHealth {
     data_retention_hours: number;
   };
   error?: string;
+  ollama?: { isAvailable: boolean; models: any[] };
+  sglang?: { isAvailable: boolean; models: any[] };
 }
 
 interface SystemStatusProps {
@@ -55,12 +60,42 @@ export function SystemStatus({ hosts }: SystemStatusProps) {
       hosts.map(async (host) => {
         try {
           const baseUrl = host.url.replace(/\/nvidia-smi\.json$/, "");
-          const res = await fetch(`${baseUrl}/api/health`, {
+          const res = await fetch(proxyUrl(`${baseUrl}/api/health`), {
             signal: AbortSignal.timeout(5000),
           });
           if (res.ok) {
             const data = await res.json();
-            results[host.url] = { ...data, url: host.url };
+            const entry: HostHealth = { ...data, url: host.url };
+
+            // Probe Ollama
+            try {
+              const ollamaRes = await fetch(proxyUrl(`${baseUrl}/api/ollama/discover`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ hostUrl: baseUrl }),
+                signal: AbortSignal.timeout(3000),
+              });
+              if (ollamaRes.ok) {
+                const ollamaData = await ollamaRes.json();
+                if (ollamaData.isAvailable) entry.ollama = ollamaData;
+              }
+            } catch {}
+
+            // Probe SGLang
+            try {
+              const sglangRes = await fetch(proxyUrl(`${baseUrl}/api/sglang/discover`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ hostUrl: baseUrl }),
+                signal: AbortSignal.timeout(3000),
+              });
+              if (sglangRes.ok) {
+                const sglangData = await sglangRes.json();
+                if (sglangData.isAvailable) entry.sglang = sglangData;
+              }
+            } catch {}
+
+            results[host.url] = entry;
           } else {
             results[host.url] = {
               url: host.url,
@@ -216,6 +251,32 @@ export function SystemStatus({ hosts }: SystemStatusProps) {
                       </div>
                     </div>
                   </div>
+
+                  {/* AI Runtimes */}
+                  {(health.ollama?.isAvailable || health.sglang?.isAvailable) && (
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 md:col-span-2">
+                      <div className="mt-0.5">
+                        <Bot className="h-4 w-4 text-purple-500" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium">AI Runtimes</div>
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {health.ollama?.isAvailable && (
+                            <Badge variant="secondary" className="gap-1 text-[10px] h-5">
+                              <Bot className="h-3 w-3" />
+                              Ollama · {health.ollama.models.length} model{health.ollama.models.length !== 1 ? 's' : ''}
+                            </Badge>
+                          )}
+                          {health.sglang?.isAvailable && (
+                            <Badge variant="secondary" className="gap-1 text-[10px] h-5 bg-cyan-500/10 text-cyan-400">
+                              <Sparkles className="h-3 w-3" />
+                              SGLang · {health.sglang.models.length} model{health.sglang.models.length !== 1 ? 's' : ''}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             )}

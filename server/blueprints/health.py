@@ -39,13 +39,19 @@ def _db_status() -> dict:
     }
 
 
+@health_bp.route("/health", methods=["GET"])
+def health_simple():
+    """Lightweight health probe for Docker / load-balancer checks."""
+    return jsonify({"status": "ok"})
+
+
 @health_bp.route("/api/health", methods=["GET"])
 def health():
     """Health check endpoint with full system status."""
     return jsonify({
         "status": "ok",
         "platform": "Accelera",
-        "version": "2.0",
+        "version": "2.1",
         "hostname": socket.gethostname(),
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "persistence": _db_status(),
@@ -57,6 +63,7 @@ def health():
             "heatmap": True,
             "topology": True,
             "ollama": True,
+            "sglang": True,
             "timeline": True,
         },
         "config": {

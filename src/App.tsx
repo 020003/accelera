@@ -10,7 +10,6 @@ import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
 
 const AdvancedVisualizations = lazy(() => import("./pages/AdvancedVisualizations"));
-const Index = lazy(() => import("./pages/Index"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -39,7 +38,6 @@ const App = () => (
               <Routes>
                 <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                 <Route path="/visualizations" element={<ProtectedRoute><AdvancedVisualizations /></ProtectedRoute>} />
-                <Route path="/legacy" element={<ProtectedRoute><Index /></ProtectedRoute>} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>

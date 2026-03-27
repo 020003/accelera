@@ -11,21 +11,23 @@ import { GpuEventsPanel } from "@/components/GpuEventsPanel";
 import { SystemStatus } from "@/components/SystemStatus";
 import { ConfigPanel } from "@/components/ConfigPanel";
 import { useAuth } from "@/hooks/useAuth";
+import { useCurrency, CURRENCIES } from "@/hooks/useCurrency";
 
 // Lazy load heavy visualization components
 const GPUTopologyMap = lazy(() => import("@/components/GPUTopologyMap").then(m => ({ default: m.GPUTopologyMap })));
 const GPU3DHeatmap = lazy(() => import("@/components/GPU3DHeatmap").then(m => ({ default: m.GPU3DHeatmap })));
-const AIWorkloadTimeline = lazy(() => import("@/components/AIWorkloadTimeline").then(m => ({ default: m.AIWorkloadTimeline })));
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Button } from "@/components/ui/button";
-import { Monitor, BarChart3, Settings, Cog, TrendingUp, NetworkIcon, Clock, Bell, ShieldAlert, Lock, LogOut, Activity, Thermometer, Zap, HardDrive, Layers, Brain, Cpu, Cable, Loader2, RefreshCw } from "lucide-react";
+import { Monitor, BarChart3, Settings, Cog, TrendingUp, NetworkIcon, Bell, ShieldAlert, Lock, LogOut, Activity, Thermometer, Zap, HardDrive, Cpu, Loader2, RefreshCw, Sun, Moon } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import type { NvidiaSmiResponse, GpuInfo } from "@/types/gpu";
+import { proxyUrl } from "@/lib/proxy";
+import { useTheme } from "@/hooks/useTheme";
 
 interface Host {
   url: string;
@@ -46,6 +48,12 @@ interface HostData {
     performanceMetrics: any;
     recentRequests: any[];
   };
+  sglang?: {
+    isAvailable: boolean;
+    models: any[];
+    sglangUrl?: string;
+    serverInfo?: any;
+  };
 }
 
 export default function Dashboard() {
@@ -59,6 +67,8 @@ export default function Dashboard() {
   const [energyRate, setEnergyRate] = useState<number>(() => 
     parseFloat(localStorage.getItem("gpu_monitor_energy_rate") || "0")
   );
+  const { currency, setCurrency } = useCurrency();
+  const { theme, toggle: toggleTheme } = useTheme();
   const [hosts, setHosts] = useState<Host[]>(() => {
     try {
       return JSON.parse(localStorage.getItem("gpu_monitor_hosts") || "[]");
@@ -70,11 +80,11 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("overview");
   const { data: topologyData } = useTopology();
   const [heatmapData, setHeatmapData] = useState(null);
-  const [timelineData, setTimelineData] = useState(null);
   const [advancedDataLoaded, setAdvancedDataLoaded] = useState(false);
   const [heatmapHours, setHeatmapHours] = useState(6);
   const [vizRefreshing, setVizRefreshing] = useState(false);
   const [ollamaStatus, setOllamaStatus] = useState<Record<string, any>>({});
+  const [sglangStatus, setSglangStatus] = useState<Record<string, any>>({});
   
   // Create a Map for the PowerUsageChart
   const hostDataMap = new Map(
@@ -105,25 +115,22 @@ export default function Dashboard() {
           const url = new URL(host.url);
           const baseUrl = `${url.protocol}//${url.host}`;
           
-          // Fetch heatmap and timeline APIs for this host in parallel
-          const [heatmapResponse, timelineResponse] = await Promise.allSettled([
-            fetch(`${baseUrl}/api/heatmap?metric=utilization&hours=2`, { signal: timeoutController.signal }), // Reduced hours for faster loading
-            fetch(`${baseUrl}/api/timeline`, { signal: timeoutController.signal })
-          ]);
+          // Fetch heatmap API for this host
+          const heatmapResponse = await fetch(
+            proxyUrl(`${baseUrl}/api/heatmap?metric=utilization&hours=2`),
+            { signal: timeoutController.signal }
+          ).catch(() => null);
 
-          const results = { host: host.name, heatmap: null, timeline: null };
+          const results: { host: string; heatmap: any } = { host: host.name, heatmap: null };
 
-          if (heatmapResponse.status === 'fulfilled' && heatmapResponse.value.ok) {
-            results.heatmap = await heatmapResponse.value.json();
-          }
-          if (timelineResponse.status === 'fulfilled' && timelineResponse.value.ok) {
-            results.timeline = await timelineResponse.value.json();
+          if (heatmapResponse?.ok) {
+            results.heatmap = await heatmapResponse.json();
           }
 
           return results;
         } catch (error) {
           console.error(`Error fetching data from ${host.name}:`, error);
-          return { host: host.name, heatmap: null, timeline: null };
+          return { host: host.name, heatmap: null };
         }
       });
 
@@ -146,25 +153,6 @@ export default function Dashboard() {
         setHeatmapData(combinedHeatmap);
       }
 
-      // Process timeline data
-      const validTimelineResults = hostResults.filter(result => result.timeline && result.timeline.events);
-      
-      if (validTimelineResults.length > 0) {
-        // Ensure unique event IDs by prefixing with host index
-        const allEvents = validTimelineResults.flatMap((result, hostIndex) => 
-          result.timeline.events.map((event: any) => ({
-            ...event,
-            id: `host${hostIndex}-${event.id}` // Make IDs unique across hosts
-          }))
-        );
-        
-        const combinedTimeline = {
-          events: allEvents,
-          hosts: [...new Set(validTimelineResults.flatMap(result => result.timeline.events.map((event: any) => event.host)))]
-        };
-        setTimelineData(combinedTimeline);
-      }
-
       setAdvancedDataLoaded(true);
 
     } catch (error) {
@@ -180,7 +168,7 @@ export default function Dashboard() {
       const baseUrl = `${url.protocol}//${url.host}`;
       
       // Call the Ollama discovery endpoint directly on the GPU host
-      const response = await fetch(`${baseUrl}/api/ollama/discover`, {
+      const response = await fetch(proxyUrl(`${baseUrl}/api/ollama/discover`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -203,10 +191,34 @@ export default function Dashboard() {
     }
   };
 
+  // Helper function to check if SGLang is available on a host
+  const checkSglangAvailability = async (hostUrl: string) => {
+    try {
+      const url = new URL(hostUrl);
+      const baseUrl = `${url.protocol}//${url.host}`;
+      
+      const response = await fetch(proxyUrl(`${baseUrl}/api/sglang/discover`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hostUrl: baseUrl }),
+        signal: AbortSignal.timeout(3000)
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        if (result.isAvailable) return result;
+      }
+      
+      return { isAvailable: false };
+    } catch {
+      return { isAvailable: false };
+    }
+  };
+
   // Helper function to fetch data from a host
   const fetchHostData = async (host: Host): Promise<HostData> => {
     try {
-      const response = await fetch(host.url);
+      const response = await fetch(proxyUrl(host.url));
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -304,6 +316,56 @@ export default function Dashboard() {
         );
       }
       
+      // Check for SGLang availability (same caching pattern as Ollama)
+      const cachedSglangStatus = sglangStatus[hostKey];
+      
+      if (!cachedSglangStatus || (now - cachedSglangStatus.lastChecked) > 300000) {
+        checkSglangAvailability(host.url).then(sglangInfo => {
+          const newSglangStatus = { ...sglangInfo, lastChecked: now };
+          
+          setSglangStatus(prev => ({ ...prev, [hostKey]: newSglangStatus }));
+          
+          if (sglangInfo.isAvailable) {
+            setHostsData(prevData => 
+              prevData.map(h => 
+                h.url === host.url 
+                  ? { 
+                      ...h, 
+                      sglang: {
+                        isAvailable: true,
+                        models: sglangInfo.models || [],
+                        sglangUrl: sglangInfo.sglangUrl,
+                        serverInfo: sglangInfo.serverInfo,
+                      }
+                    }
+                  : h
+              )
+            );
+          }
+        }).catch(() => {
+          setSglangStatus(prev => ({
+            ...prev,
+            [hostKey]: { isAvailable: false, lastChecked: now }
+          }));
+        });
+      } else if (cachedSglangStatus.isAvailable) {
+        setHostsData(prevData => 
+          prevData.map(h => 
+            h.url === host.url 
+              ? { 
+                  ...h, 
+                  sglang: {
+                    isAvailable: true,
+                    models: cachedSglangStatus.models || [],
+                    sglangUrl: cachedSglangStatus.sglangUrl,
+                    serverInfo: cachedSglangStatus.serverInfo,
+                  }
+                }
+              : h
+          )
+        );
+      }
+
       return hostData;
     } catch (error) {
       return {
@@ -371,8 +433,9 @@ export default function Dashboard() {
             newData[existingIndex] = {
               ...existing,
               ...newHostData,
-              // Preserve ollama data if it exists and new data doesn't have it
-              ollama: newHostData.ollama || existing.ollama
+              // Preserve ollama/sglang data if it exists and new data doesn't have it
+              ollama: newHostData.ollama || existing.ollama,
+              sglang: newHostData.sglang || existing.sglang
             };
             hasChanges = true;
           }
@@ -435,8 +498,6 @@ export default function Dashboard() {
     }
   }, [activeTab, advancedDataLoaded, hosts.length]);
 
-  // The timeline is nested under visualizations tab, so we fetch it when visualizations is accessed
-  // The existing fetchAdvancedVisualizationData already handles timeline data
 
   const handleRefreshInterval = (value: string) => {
     const interval = parseInt(value);
@@ -465,7 +526,10 @@ export default function Dashboard() {
   const connectedHosts = hostsData.filter(h => h.isConnected);
   const totalGpus = connectedHosts.reduce((sum, host) => sum + host.gpus.length, 0);
   const totalOllamaModels = hostsData.reduce((sum, host) => sum + (host.ollama?.models.length || 0), 0);
+  const totalSglangModels = hostsData.reduce((sum, host) => sum + (host.sglang?.models.length || 0), 0);
+  const totalAiModels = totalOllamaModels + totalSglangModels;
   const hostsWithOllama = hostsData.filter(h => h.ollama?.isAvailable).length;
+  const hostsWithSglang = hostsData.filter(h => h.sglang?.isAvailable).length;
 
   return (
     <div className="min-h-screen bg-background">
@@ -502,18 +566,32 @@ export default function Dashboard() {
               <div className="text-sm text-muted-foreground">
                 <span className="font-medium">Ollama:</span> {hostsWithOllama}/{hostsData.length}
               </div>
+              {hostsWithSglang > 0 && (
+                <div className="text-sm text-muted-foreground">
+                  <span className="font-medium">SGLang:</span> {hostsWithSglang}/{hostsData.length}
+                </div>
+              )}
               <div className="text-sm text-muted-foreground">
-                <span className="font-medium">AI Models:</span> {totalOllamaModels}
+                <span className="font-medium">AI Models:</span> {totalAiModels}
               </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={toggleTheme}
+                title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              >
+                {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </Button>
               <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm ${
-                (connectedHosts.length > 0 || hostsWithOllama > 0)
+                (connectedHosts.length > 0 || hostsWithOllama > 0 || hostsWithSglang > 0)
                   ? "bg-accelera-green/10 text-accelera-green" 
                   : "bg-red-500/10 text-red-500"
               }`}>
                 <div className={`w-2 h-2 rounded-full ${
-                  (connectedHosts.length > 0 || hostsWithOllama > 0) ? "bg-accelera-green animate-pulse-slow" : "bg-red-500"
+                  (connectedHosts.length > 0 || hostsWithOllama > 0 || hostsWithSglang > 0) ? "bg-accelera-green animate-pulse-slow" : "bg-red-500"
                 }`} />
-                {(connectedHosts.length > 0 || hostsWithOllama > 0) ? "Online" : "Offline"}
+                {(connectedHosts.length > 0 || hostsWithOllama > 0 || hostsWithSglang > 0) ? "Online" : "Offline"}
               </div>
               
             </div>
@@ -535,11 +613,17 @@ export default function Dashboard() {
               Advanced Visualizations
             </TabsTrigger>
             {hostsData.map((host) => (
-              <TabsTrigger key={host.url} value={host.url} className="flex items-center gap-2">
+              <TabsTrigger key={host.url} value={host.url} className="flex items-center gap-1.5">
                 <Monitor className="h-4 w-4" />
                 {host.name}
                 {host.isConnected && (
                   <div className="w-2 h-2 bg-accelera-green rounded-full" />
+                )}
+                {host.ollama?.isAvailable && (
+                  <span className="text-[9px] px-1 py-0.5 rounded bg-purple-500/10 text-purple-400 font-medium leading-none">O</span>
+                )}
+                {host.sglang?.isAvailable && (
+                  <span className="text-[9px] px-1 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-medium leading-none">S</span>
                 )}
               </TabsTrigger>
             ))}
@@ -559,12 +643,13 @@ export default function Dashboard() {
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
-            <MultiHostOverview hostsData={hostsData} energyRate={energyRate} />
+            <MultiHostOverview hostsData={hostsData} energyRate={energyRate} currencySymbol={currency.symbol} />
             <PowerUsageChart 
               hosts={hosts} 
               hostData={hostDataMap} 
               refreshInterval={refreshInterval}
               energyRate={energyRate}
+              currencySymbol={currency.symbol}
             />
           </TabsContent>
 
@@ -581,10 +666,6 @@ export default function Dashboard() {
                   <TabsTrigger value="heatmap" className="gap-1.5 text-xs">
                     <BarChart3 className="h-3.5 w-3.5" />
                     Cluster Heatmap
-                  </TabsTrigger>
-                  <TabsTrigger value="timeline" className="gap-1.5 text-xs">
-                    <Clock className="h-3.5 w-3.5" />
-                    Workload Timeline
                   </TabsTrigger>
                 </TabsList>
                 <Button
@@ -669,33 +750,6 @@ export default function Dashboard() {
                 </Suspense>
               </TabsContent>
 
-              {/* ── Timeline ── */}
-              <TabsContent value="timeline" className="space-y-3">
-                <div className="flex items-center gap-4 flex-wrap text-xs">
-                  {[
-                    { label: "Model Loading", color: "bg-blue-500", icon: Layers },
-                    { label: "Inference", color: "bg-emerald-500", icon: Brain },
-                    { label: "GPU Allocation", color: "bg-violet-500", icon: Cpu },
-                    { label: "Training", color: "bg-blue-400", icon: Cable },
-                  ].map((l) => {
-                    const Icon = l.icon;
-                    return (
-                      <div key={l.label} className="flex items-center gap-1.5">
-                        <div className={`w-2.5 h-2.5 rounded-sm ${l.color}`} />
-                        <Icon className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-muted-foreground">{l.label}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-                <Suspense fallback={<VizLoading text="Loading timeline..." />}>
-                  {timelineData ? (
-                    <AIWorkloadTimeline data={timelineData} />
-                  ) : (
-                    <VizEmpty text="No timeline data. Workload events appear as Ollama processes requests." />
-                  )}
-                </Suspense>
-              </TabsContent>
             </Tabs>
           </TabsContent>
 
@@ -711,8 +765,10 @@ export default function Dashboard() {
                 error={host.error}
                 timestamp={host.timestamp}
                 energyRate={energyRate}
+                currencySymbol={currency.symbol}
                 onRefresh={fetchAllHostsData}
                 ollama={host.ollama}
+                sglang={host.sglang}
               />
             </TabsContent>
           ))}
@@ -784,7 +840,23 @@ export default function Dashboard() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label>Energy Rate ($/kWh)</Label>
+                    <Label>Currency</Label>
+                    <Select value={currency.code} onValueChange={setCurrency}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CURRENCIES.map((c) => (
+                          <SelectItem key={c.code} value={c.code}>
+                            {c.symbol} — {c.name} ({c.code})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Energy Rate ({currency.symbol}/kWh)</Label>
                     <Input
                       type="number"
                       step="0.01"
@@ -808,7 +880,10 @@ export default function Dashboard() {
                     fetchAllHostsData();
                   }
                 }}
-                onHostStatusChange={() => {}} 
+                onHostStatusChange={() => {}}
+                hostsAiInfo={Object.fromEntries(
+                  hostsData.map(h => [h.url, { ollama: h.ollama, sglang: h.sglang }])
+                )}
               />
             )}
 
@@ -827,16 +902,16 @@ export default function Dashboard() {
           <div className="flex items-center justify-between text-sm text-muted-foreground">
             <div>Accelera v2.0 - High-Performance GPU Acceleration Platform</div>
             <div className="flex items-center space-x-4">
-              {(totalGpus > 0 || totalOllamaModels > 0) && (
+              {(totalGpus > 0 || totalAiModels > 0) && (
                 <div className="flex items-center gap-4">
                   {totalGpus > 0 && (
                     <span>
                       {totalGpus} GPU{totalGpus !== 1 ? 's' : ''} across {connectedHosts.length} host{connectedHosts.length !== 1 ? 's' : ''}
                     </span>
                   )}
-                  {totalOllamaModels > 0 && (
+                  {totalAiModels > 0 && (
                     <span>
-                      {totalOllamaModels} AI model{totalOllamaModels !== 1 ? 's' : ''} on {hostsWithOllama} host{hostsWithOllama !== 1 ? 's' : ''}
+                      {totalAiModels} AI model{totalAiModels !== 1 ? 's' : ''} on {hostsWithOllama + hostsWithSglang} host{(hostsWithOllama + hostsWithSglang) !== 1 ? 's' : ''}
                     </span>
                   )}
                 </div>
@@ -854,12 +929,12 @@ function DashboardAccessCard() {
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
 
-  const handleSetPassword = () => {
+  const handleSetPassword = async () => {
     if (!newPass || newPass !== confirmPass) {
       toast.error("Passwords do not match");
       return;
     }
-    setPassword(newPass);
+    await setPassword(newPass);
     setNewPass("");
     setConfirmPass("");
     toast.success("Dashboard password set");

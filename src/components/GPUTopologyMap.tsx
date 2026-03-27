@@ -81,7 +81,7 @@ const nodeTypes = {
     
     return (
       <TooltipProvider>
-        <div className="bg-gradient-to-br from-slate-800 to-slate-900 border-2 border-primary rounded-lg p-3 min-w-[240px] shadow-lg relative">
+        <div className="bg-card border-2 border-primary rounded-lg p-3 min-w-[240px] shadow-lg relative">
           {showLeftHandle && <Handle type="target" position={Position.Left} className="w-3 h-3" />}
           {showRightHandle && <Handle type="source" position={Position.Right} className="w-3 h-3" />}
           <div className="flex items-center justify-between mb-2">
@@ -165,7 +165,7 @@ const nodeTypes = {
     const nicDetails = gpuWithNic?.nic_connections?.[0];
     
     return (
-      <div className="bg-gradient-to-br from-blue-950/20 to-blue-900/20 border-2 border-blue-500/50 rounded-xl p-4 min-w-[600px] shadow-xl">
+      <div className="bg-card/80 border-2 border-primary/40 rounded-xl p-4 min-w-[600px] shadow-xl">
         {data.hasMellanox && (
           <Handle 
             type="source" 
@@ -177,14 +177,14 @@ const nodeTypes = {
         )}
         <div className="flex items-center gap-2 mb-3">
           <HardDrive className="h-5 w-5 text-blue-400" />
-          <span className="font-bold text-lg text-blue-100">Host: {data.hostname}</span>
+          <span className="font-bold text-lg text-foreground">Host: {data.hostname}</span>
           {data.hasMellanox && nicDetails && (
             <div className="ml-auto flex items-center gap-2">
-              <Badge variant="outline" className="bg-purple-500/20 text-purple-200 border-purple-400">
+              <Badge variant="outline" className="bg-purple-500/20 text-purple-400 dark:text-purple-200 border-purple-400">
                 <Network className="h-3 w-3 mr-1" />
                 {nicDetails.nic_name}
               </Badge>
-              <Badge variant="outline" className="bg-purple-500/10 text-purple-300 border-purple-400/50 text-xs">
+              <Badge variant="outline" className="bg-purple-500/10 text-purple-500 dark:text-purple-300 border-purple-400/50 text-xs">
                 {nicDetails.connection_type === 'NODE' ? 'PCIe Direct' : 
                  nicDetails.connection_type === 'SYS' ? 'Cross-Socket' :
                  nicDetails.connection_type === 'PHB' ? 'Host Bridge' :
@@ -214,7 +214,7 @@ const nodeTypes = {
               <React.Fragment key={gpu.id}>
                 <div className="relative">
                   {/* Internal GPU card */}
-                  <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-600 rounded-lg p-3 min-w-[240px]">
+                  <div className="bg-card border border-border rounded-lg p-3 min-w-[240px]">
                   {/* GPU-to-GPU handles */}
                   {position === 'left' && (
                     <Handle 
@@ -295,7 +295,7 @@ const nodeTypes = {
   
   fabric: ({ data }: { data: FabricNodeData }) => {
     return (
-      <div className="bg-gradient-to-br from-purple-600/30 to-blue-600/30 border-2 border-purple-500 rounded-2xl p-8 min-w-[220px] min-h-[220px] shadow-2xl flex flex-col items-center justify-center backdrop-blur-sm">
+      <div className="bg-gradient-to-br from-purple-600/20 to-blue-600/20 dark:from-purple-600/30 dark:to-blue-600/30 border-2 border-purple-500 rounded-2xl p-8 min-w-[220px] min-h-[220px] shadow-2xl flex flex-col items-center justify-center backdrop-blur-sm">
         <Handle 
           type="target" 
           position={Position.Bottom} 
@@ -303,11 +303,11 @@ const nodeTypes = {
           className="w-4 h-4 bg-purple-500" 
           style={{ left: '50%', transform: 'translateX(-50%)' }}
         />
-        <div className="absolute top-0 left-0 w-full h-full rounded-2xl bg-gradient-to-br from-purple-400/10 to-blue-400/10 animate-pulse" />
+        <div className="absolute top-0 left-0 w-full h-full rounded-2xl bg-gradient-to-br from-purple-400/5 to-blue-400/5 dark:from-purple-400/10 dark:to-blue-400/10 animate-pulse" />
         <Network className="h-14 w-14 text-purple-400 mb-3 relative z-10" />
-        <span className="font-bold text-xl text-purple-100 relative z-10">{data.label}</span>
-        <span className="text-sm text-purple-200 mt-1 relative z-10">{data.type}</span>
-        <div className="mt-2 text-xs text-purple-300 relative z-10">High-Speed Interconnect</div>
+        <span className="font-bold text-xl text-purple-700 dark:text-purple-100 relative z-10">{data.label}</span>
+        <span className="text-sm text-purple-600 dark:text-purple-200 mt-1 relative z-10">{data.type}</span>
+        <div className="mt-2 text-xs text-purple-500 dark:text-purple-300 relative z-10">High-Speed Interconnect</div>
       </div>
     );
   },
@@ -512,7 +512,7 @@ export function GPUTopologyMap({ data }: { data?: GPUTopologyData }) {
                     fontWeight: 700,
                     fill: style.stroke,
                   },
-                  labelBgStyle: { fill: 'white', fillOpacity: 0.95 },
+                  labelBgStyle: { fill: 'hsl(var(--card))', fillOpacity: 0.95 },
                   data: {
                     type: conn.type,
                     bandwidth: conn.bandwidth,
@@ -559,7 +559,7 @@ export function GPUTopologyMap({ data }: { data?: GPUTopologyData }) {
               fontWeight: 700,
               fill: style.stroke,
             },
-            labelBgStyle: { fill: 'white', fillOpacity: 0.95 },
+            labelBgStyle: { fill: 'hsl(var(--card))', fillOpacity: 0.95 },
             markerEnd: {
               type: MarkerType.ArrowClosed,
               color: style.stroke,

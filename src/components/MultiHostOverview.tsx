@@ -27,6 +27,7 @@ import {
   DollarSign,
   CheckCircle,
   AlertTriangle,
+  Sparkles,
 } from "lucide-react";
 import { useFleetTokenStats } from "@/hooks/useFleetTokenStats";
 import type { GpuInfo } from "@/types/gpu";
@@ -44,11 +45,18 @@ interface HostData {
     performanceMetrics: any;
     recentRequests: any[];
   };
+  sglang?: {
+    isAvailable: boolean;
+    models: any[];
+    sglangUrl?: string;
+    serverInfo?: any;
+  };
 }
 
 interface MultiHostOverviewProps {
   hostsData: HostData[];
   energyRate: number;
+  currencySymbol?: string;
 }
 
 function fmt(n: number): string {
@@ -72,7 +80,7 @@ const TIME_RANGES = [
   { label: "7d", hours: 168 },
 ] as const;
 
-export function MultiHostOverview({ hostsData, energyRate }: MultiHostOverviewProps) {
+export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$" }: MultiHostOverviewProps) {
   const [hours, setHours] = useState(24);
   const connectedHosts = hostsData.filter((h) => h.isConnected);
   const allGpus = connectedHosts.flatMap((h) => h.gpus);
@@ -95,10 +103,11 @@ export function MultiHostOverview({ hostsData, energyRate }: MultiHostOverviewPr
   const dailyCost = hourlyCost * 24;
 
   const totalModels = hostsData.reduce(
-    (s, h) => s + (h.ollama?.models.length || 0),
+    (s, h) => s + (h.ollama?.models.length || 0) + (h.sglang?.models.length || 0),
     0
   );
   const hostsWithOllama = hostsData.filter((h) => h.ollama?.isAvailable).length;
+  const hostsWithSglang = hostsData.filter((h) => h.sglang?.isAvailable).length;
 
   // Fleet-wide token stats
   const hostUrls = hostsData.map((h) => h.url);
@@ -114,16 +123,21 @@ export function MultiHostOverview({ hostsData, energyRate }: MultiHostOverviewPr
     return { name: h.name, util, gpus: gpus.length };
   });
 
-  // Token history for fleet chart
-  const chartData = (fleet?.history ?? []).slice(-60).map((pt) => ({
-    time: new Date(pt.time).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
-    tokens: pt.total,
-    generated: pt.generated,
-    prompt: pt.prompt,
-  }));
+  // Token history for fleet chart — downsample to ~120 pts, keep full range
+  const rawHistory = fleet?.history ?? [];
+  const maxPts = 120;
+  const step = rawHistory.length > maxPts ? Math.ceil(rawHistory.length / maxPts) : 1;
+  const chartData = rawHistory
+    .filter((_, i) => i % step === 0 || i === rawHistory.length - 1)
+    .map((pt) => ({
+      time: new Date(pt.time).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      tokens: pt.total,
+      generated: pt.generated,
+      prompt: pt.prompt,
+    }));
 
   const rangeLabel = TIME_RANGES.find((r) => r.hours === hours)?.label ?? `${hours}h`;
 
@@ -207,7 +221,7 @@ export function MultiHostOverview({ hostsData, energyRate }: MultiHostOverviewPr
             bg: "bg-amber-500/10",
             sub:
               energyRate > 0
-                ? `$${hourlyCost.toFixed(2)}/hr`
+                ? `${currencySymbol}${hourlyCost.toFixed(2)}/hr`
                 : undefined,
           },
           {
@@ -228,8 +242,11 @@ export function MultiHostOverview({ hostsData, energyRate }: MultiHostOverviewPr
             color: "text-purple-500",
             bg: "bg-purple-500/10",
             sub:
-              hostsWithOllama > 0
-                ? `${hostsWithOllama} host${hostsWithOllama > 1 ? "s" : ""}`
+              hostsWithOllama > 0 || hostsWithSglang > 0
+                ? [
+                    hostsWithOllama > 0 ? `${hostsWithOllama} Ollama` : "",
+                    hostsWithSglang > 0 ? `${hostsWithSglang} SGLang` : "",
+                  ].filter(Boolean).join(" + ")
                 : undefined,
           },
         ].map((kpi) => {
@@ -496,26 +513,26 @@ export function MultiHostOverview({ hostsData, energyRate }: MultiHostOverviewPr
                   <div className="p-2.5 rounded-lg bg-muted/30">
                     <div className="text-[10px] text-muted-foreground">Hourly</div>
                     <div className="text-lg font-bold font-mono text-emerald-500">
-                      ${hourlyCost.toFixed(2)}
+                      {currencySymbol}{hourlyCost.toFixed(2)}
                     </div>
                   </div>
                   <div className="p-2.5 rounded-lg bg-muted/30">
                     <div className="text-[10px] text-muted-foreground">Daily</div>
                     <div className="text-lg font-bold font-mono text-emerald-500">
-                      ${dailyCost.toFixed(2)}
+                      {currencySymbol}{dailyCost.toFixed(2)}
                     </div>
                   </div>
                   <div className="p-2.5 rounded-lg bg-muted/30">
                     <div className="text-[10px] text-muted-foreground">Monthly (est)</div>
                     <div className="text-lg font-bold font-mono text-emerald-500">
-                      ${(dailyCost * 30).toFixed(0)}
+                      {currencySymbol}{(dailyCost * 30).toFixed(0)}
                     </div>
                   </div>
                   <div className="p-2.5 rounded-lg bg-muted/30">
-                    <div className="text-[10px] text-muted-foreground">$/GPU/hr</div>
+                    <div className="text-[10px] text-muted-foreground">{currencySymbol}/GPU/hr</div>
                     <div className="text-lg font-bold font-mono text-emerald-500">
                       {totalGpus > 0
-                        ? `$${(hourlyCost / totalGpus).toFixed(3)}`
+                        ? `${currencySymbol}${(hourlyCost / totalGpus).toFixed(3)}`
                         : "—"}
                     </div>
                   </div>
@@ -523,17 +540,16 @@ export function MultiHostOverview({ hostsData, energyRate }: MultiHostOverviewPr
                 {(fleet?.summary.total_tokens ?? 0) > 0 && (
                   <div className="p-2.5 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
                     <div className="text-[10px] text-muted-foreground">
-                      Cost per 1K tokens (24h)
+                      Cost per 1M tokens ({rangeLabel})
                     </div>
                     <div className="text-lg font-bold font-mono text-emerald-500">
-                      $
+                      {currencySymbol}
                       {(
-                        (dailyCost / (fleet!.summary.total_tokens / 1000)) *
-                        1
-                      ).toFixed(4)}
+                        (hourlyCost * hours) / (fleet!.summary.total_tokens / 1_000_000)
+                      ).toFixed(2)}
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-0.5">
-                      Based on {fmt(fleet!.summary.total_tokens)} tokens &
+                      Based on {fmt(fleet!.summary.total_tokens)} tokens in {rangeLabel} &
                       current power draw
                     </div>
                   </div>
@@ -594,6 +610,15 @@ export function MultiHostOverview({ hostsData, energyRate }: MultiHostOverviewPr
                           >
                             <Bot className="h-2.5 w-2.5 mr-0.5" />
                             {host.ollama.models.length}
+                          </Badge>
+                        )}
+                        {host.sglang?.isAvailable && (
+                          <Badge
+                            variant="secondary"
+                            className="text-[9px] h-4 px-1.5 bg-cyan-500/10 text-cyan-400"
+                          >
+                            <Sparkles className="h-2.5 w-2.5 mr-0.5" />
+                            {host.sglang.models.length}
                           </Badge>
                         )}
                         <Badge

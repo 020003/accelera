@@ -35,6 +35,10 @@ export type AlertMetric =
   | "power_draw"
   | "memory_percent"
   | "memory_used"
-  | "fan";
+  | "fan"
+  | "tps"
+  | "total_tokens"
+  | "token_request_count"
+  | "avg_latency_sec";
 
 export type AlertComparison = ">" | ">=" | "<" | "<=" | "==";

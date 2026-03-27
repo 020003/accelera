@@ -1,5 +1,6 @@
 import { useQueries } from "@tanstack/react-query";
 import type { TokenStats, TokenModelStats, TokenHistoryPoint } from "./useTokenStats";
+import { proxyUrl } from "@/lib/proxy";
 
 export interface FleetTokenStats {
   summary: {
@@ -25,7 +26,7 @@ export function useFleetTokenStats(
       return {
         queryKey: ["fleet-token-stats", base, hours],
         queryFn: async (): Promise<{ url: string; data: TokenStats }> => {
-          const res = await fetch(`${base}/api/tokens/stats?hours=${hours}`);
+          const res = await fetch(proxyUrl(`${base}/api/tokens/stats?hours=${hours}`));
           if (!res.ok) throw new Error(`${res.status}`);
           const data: TokenStats = await res.json();
           return { url, data };

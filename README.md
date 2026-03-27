@@ -23,6 +23,7 @@ Real-time monitoring, AI workload management, and cluster analytics for NVIDIA G
 
 ### AI Workload Integration
 - **Ollama auto-discovery** — detects running Ollama instances on each GPU host
+- **SGLang auto-discovery** — detects SGLang Runtime servers (OpenAI-compatible `/v1/models`)
 - **Token statistics** — collected from Ollama Prometheus metrics, stored in SQLite, served via `/api/tokens/stats`
 - **Per-model breakdown** — generated tokens, prompt tokens, requests, avg tokens/sec per model
 - **Time-series charts** — 5-minute bucket token history with Recharts area/bar charts
@@ -150,6 +151,7 @@ See [`.env.example`](.env.example) for the full list.
 | `GET` | `/api/timeline` | AI workload timeline events |
 | `GET` | `/api/tokens/stats?hours=24` | Token usage statistics |
 | `POST` | `/api/ollama/discover` | Discover Ollama on a host |
+| `POST` | `/api/sglang/discover` | Discover SGLang Runtime on a host |
 | `GET` | `/api/gpu/events` | GPU health events (NVML + Xid) |
 | `GET/POST` | `/api/alerts/rules` | Alert rule CRUD |
 | `GET` | `/api/alerts/events` | Alert event history |

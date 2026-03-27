@@ -18,6 +18,7 @@ import {
   HardDrive,
   Thermometer,
   Zap,
+  Sparkles,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -32,12 +33,19 @@ interface HostTabProps {
   error?: string;
   timestamp?: string;
   energyRate: number;
+  currencySymbol?: string;
   onRefresh: () => void;
   ollama?: {
     isAvailable: boolean;
     models: any[];
     performanceMetrics: any;
     recentRequests: any[];
+  };
+  sglang?: {
+    isAvailable: boolean;
+    models: any[];
+    sglangUrl?: string;
+    serverInfo?: any;
   };
 }
 
@@ -58,8 +66,10 @@ export function HostTab({
   error,
   timestamp,
   energyRate,
+  currencySymbol = "$",
   onRefresh,
   ollama,
+  sglang,
 }: HostTabProps) {
   const [tokenHours, setTokenHours] = useState(24);
   const { data: tokenStats, isLoading: tokenLoading } = useTokenStats(hostUrl, tokenHours);
@@ -105,6 +115,12 @@ export function HostTab({
                 <Badge variant="secondary" className="text-[10px] h-5 gap-1">
                   <Bot className="h-3 w-3" />
                   Ollama · {ollama.models.length} models
+                </Badge>
+              )}
+              {sglang?.isAvailable && (
+                <Badge variant="secondary" className="text-[10px] h-5 gap-1 bg-cyan-500/10 text-cyan-400">
+                  <Sparkles className="h-3 w-3" />
+                  SGLang · {sglang.models.length} models
                 </Badge>
               )}
             </h2>
@@ -192,16 +208,25 @@ export function HostTab({
                 ? [
                     {
                       label: "AI Models",
-                      value: ollama.models.length,
+                      value: (ollama?.models.length || 0) + (sglang?.models.length || 0),
                       icon: Brain,
                       color: "text-purple-500",
                       bg: "bg-purple-500/10",
-                      sub: formatBytes(
-                        ollama.models.reduce(
-                          (s: number, m: any) => s + m.size,
-                          0
-                        )
-                      ),
+                      sub: [
+                        ollama?.isAvailable ? `${ollama.models.length} Ollama` : "",
+                        sglang?.isAvailable ? `${sglang.models.length} SGLang` : "",
+                      ].filter(Boolean).join(" + "),
+                    },
+                  ]
+                : sglang?.isAvailable
+                ? [
+                    {
+                      label: "AI Models",
+                      value: sglang.models.length,
+                      icon: Brain,
+                      color: "text-cyan-500",
+                      bg: "bg-cyan-500/10",
+                      sub: `${sglang.models.length} SGLang`,
                     },
                   ]
                 : []),
@@ -246,7 +271,13 @@ export function HostTab({
               {ollama?.isAvailable && (
                 <TabsTrigger value="ollama" className="gap-1.5 text-xs">
                   <Bot className="h-3.5 w-3.5" />
-                  AI Models ({ollama.models.length})
+                  Ollama ({ollama.models.length})
+                </TabsTrigger>
+              )}
+              {sglang?.isAvailable && (
+                <TabsTrigger value="sglang" className="gap-1.5 text-xs">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  SGLang ({sglang.models.length})
                 </TabsTrigger>
               )}
             </TabsList>
@@ -256,7 +287,7 @@ export function HostTab({
               <div className="grid gap-4 lg:grid-cols-2">
                 {gpus.map((gpu) => (
                   <div key={gpu.uuid || gpu.id} className="animate-fade-in">
-                    <GpuCard gpu={gpu} energyRate={energyRate} />
+                    <GpuCard gpu={gpu} energyRate={energyRate} currencySymbol={currencySymbol} />
                   </div>
                 ))}
               </div>
@@ -334,6 +365,45 @@ export function HostTab({
                             </div>
                             <div className="text-xs text-muted-foreground">
                               {formatBytes(model.size)}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+            )}
+
+            {sglang?.isAvailable && (
+              <TabsContent value="sglang">
+                {sglang.models.length === 0 ? (
+                  <Card>
+                    <CardContent className="flex flex-col items-center justify-center py-12">
+                      <Sparkles className="h-10 w-10 text-muted-foreground mb-3" />
+                      <p className="text-sm font-medium">No Models Loaded</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        No models are currently loaded in SGLang Runtime.
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                    {sglang.models.map((model: any) => (
+                      <Card
+                        key={model.id}
+                        className="shadow-none border-border/50"
+                      >
+                        <CardContent className="p-4 flex items-center gap-3">
+                          <div className="p-2 rounded-md bg-cyan-500/10">
+                            <Sparkles className="h-4 w-4 text-cyan-500" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium truncate">
+                              {model.id}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {model.owned_by || "sglang"}
                             </div>
                           </div>
                         </CardContent>

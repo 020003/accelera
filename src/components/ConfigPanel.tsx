@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { proxyUrl } from "@/lib/proxy";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -162,7 +163,7 @@ function HostConfigCard({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${baseUrl}/api/settings`, {
+      const res = await fetch(proxyUrl(`${baseUrl}/api/settings`), {
         signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -207,7 +208,7 @@ function HostConfigCard({
     if (!hasDirty) return;
     setSaving(true);
     try {
-      const res = await fetch(`${baseUrl}/api/settings`, {
+      const res = await fetch(proxyUrl(`${baseUrl}/api/settings`), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ settings: dirty }),
@@ -234,7 +235,7 @@ function HostConfigCard({
   const handleReset = async () => {
     setSaving(true);
     try {
-      const res = await fetch(`${baseUrl}/api/settings/reset`, {
+      const res = await fetch(proxyUrl(`${baseUrl}/api/settings/reset`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),

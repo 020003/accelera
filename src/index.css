@@ -42,8 +42,8 @@
   }
 
   .light {
-    /* Light mode overrides (rarely used for Accelera) */
-    --background: 0 0% 100%;
+    /* Light mode overrides */
+    --background: 210 40% 98%;
     --foreground: 219 60% 7%;
     --card: 0 0% 100%;
     --card-foreground: 219 60% 7%;
@@ -55,10 +55,13 @@
     --secondary-foreground: 219 60% 7%;
     --muted: 210 40% 96.1%;
     --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 158 100% 50%;
-    --accent-foreground: 219 60% 7%;
+    --accent: 158 80% 38%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
+    --ring: 214 100% 47%;
   }
 
   * {
@@ -212,6 +215,25 @@
   @keyframes fadeIn {
     from { opacity: 0; transform: translateY(20px); }
     to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ReactFlow light mode fixes */
+  .light .react-flow__background {
+    background-color: hsl(var(--card)) !important;
+  }
+  .light .react-flow__controls button {
+    background-color: hsl(var(--card)) !important;
+    color: hsl(var(--foreground)) !important;
+    border-color: hsl(var(--border)) !important;
+  }
+  .light .react-flow__controls button:hover {
+    background-color: hsl(var(--muted)) !important;
+  }
+  .light .react-flow__attribution {
+    background: rgba(255,255,255,0.6) !important;
+  }
+  .light .react-flow__attribution a {
+    color: hsl(var(--muted-foreground)) !important;
   }
 
   .animate-shake {

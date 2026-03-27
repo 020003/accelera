@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { proxyUrl } from "@/lib/proxy";
 
 export interface TokenModelStats {
   generated_tokens: number;
@@ -34,7 +35,7 @@ export function useTokenStats(hostUrl?: string, hours = 24) {
   return useQuery<TokenStats>({
     queryKey: ["token-stats", baseUrl, hours],
     queryFn: async () => {
-      const res = await fetch(`${baseUrl}/api/tokens/stats?hours=${hours}`);
+      const res = await fetch(proxyUrl(`${baseUrl}/api/tokens/stats?hours=${hours}`));
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       return res.json();
     },

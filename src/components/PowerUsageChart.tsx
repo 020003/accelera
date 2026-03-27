@@ -20,6 +20,7 @@ interface PowerUsageChartProps {
   hostData: Map<string, { gpus: GpuInfo[]; timestamp?: string }>;
   refreshInterval: number;
   energyRate?: number;
+  currencySymbol?: string;
 }
 
 const CHART_COLORS = [
@@ -39,7 +40,8 @@ export const PowerUsageChart = memo(function PowerUsageChart({
   hosts, 
   hostData, 
   refreshInterval,
-  energyRate = 0 
+  energyRate = 0,
+  currencySymbol = "$"
 }: PowerUsageChartProps) {
   const [chartData, setChartData] = useState<PowerDataPoint[]>([]);
   const [totalPower, setTotalPower] = useState(0);
@@ -102,7 +104,7 @@ export const PowerUsageChart = memo(function PowerUsageChart({
     const cost = energyRate > 0 ? (value / 1000) * energyRate : 0;
     return [
       `${value}W`,
-      cost > 0 ? `($${cost.toFixed(3)}/hr)` : name
+      cost > 0 ? `(${currencySymbol}${cost.toFixed(3)}/hr)` : name
     ];
   };
 
@@ -124,7 +126,7 @@ export const PowerUsageChart = memo(function PowerUsageChart({
             </div>
             {hourlyCost > 0 && (
               <Badge variant="outline" className="text-emerald font-medium">
-                ${hourlyCost.toFixed(2)}/hr
+                {currencySymbol}{hourlyCost.toFixed(2)}/hr
               </Badge>
             )}
           </div>
