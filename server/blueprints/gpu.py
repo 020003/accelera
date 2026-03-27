@@ -11,6 +11,16 @@ from utils import run_cmd
 gpu_bp = Blueprint("gpu", __name__)
 
 
+def _safe_int(val: str, default: int = 0) -> int:
+    """Convert a nvidia-smi CSV value to int, returning *default* for N/A etc."""
+    if not val or val in ("N/A", "[N/A]", "[Not Supported]", "Not Supported", "ERR!"):
+        return default
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return default
+
+
 def get_gpus() -> list[dict]:
     """Query nvidia-smi for GPU metrics and attach process info."""
     q = ("index,uuid,name,driver_version,temperature.gpu,utilization.gpu,"
@@ -21,18 +31,24 @@ def get_gpus() -> list[dict]:
         parts = [p.strip() for p in line.split(",")]
         if len(parts) < 10:
             continue
-        idx = int(parts[0])
-        uuid = parts[1] or None
-        name = parts[2]
-        driver = parts[3] or None
-        temp = int(float(parts[4] or 0))
-        util = int(float(parts[5] or 0))
-        mem_used = int(float(parts[6] or 0))
-        mem_total = int(float(parts[7] or 0))
-        p_draw = int(float(parts[8] or 0))
-        p_limit = int(float(parts[9] or 0))
-        fan_raw = parts[10] if len(parts) > 10 else ""
-        fan = int(float(fan_raw)) if fan_raw and fan_raw not in ("N/A", "[N/A]") else None
+        try:
+            idx = _safe_int(parts[0], -1)
+            if idx < 0:
+                continue
+            uuid = parts[1] if parts[1] and parts[1] not in ("[N/A]", "N/A") else None
+            name = parts[2]
+            driver = parts[3] if parts[3] and parts[3] not in ("[N/A]", "N/A") else None
+            temp = _safe_int(parts[4])
+            util = _safe_int(parts[5])
+            mem_used = _safe_int(parts[6])
+            mem_total = _safe_int(parts[7])
+            p_draw = _safe_int(parts[8])
+            p_limit = _safe_int(parts[9])
+            fan_raw = parts[10] if len(parts) > 10 else ""
+            fan = _safe_int(fan_raw, -1)
+            fan = fan if fan >= 0 else None
+        except Exception:
+            continue
         gpus.append({
             "id": idx,
             "uuid": uuid,
