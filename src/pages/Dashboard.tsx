@@ -19,7 +19,8 @@ const GPU3DHeatmap = lazy(() => import("@/components/GPU3DHeatmap").then(m => ({
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Button } from "@/components/ui/button";
-import { Monitor, BarChart3, Settings, Cog, TrendingUp, NetworkIcon, Bell, ShieldAlert, Lock, LogOut, Activity, Thermometer, Zap, HardDrive, Cpu, Loader2, RefreshCw, Sun, Moon } from "lucide-react";
+import { Monitor, BarChart3, Settings, Cog, TrendingUp, NetworkIcon, Bell, ShieldAlert, Lock, LogOut, Activity, Thermometer, Zap, HardDrive, Cpu, Loader2, RefreshCw, Sun, Moon, Timer, DollarSign, Eye, EyeOff, Info } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -793,105 +794,165 @@ export default function Dashboard() {
           </TabsContent>
 
           {/* Settings Tab */}
-          <TabsContent value="settings" className="space-y-6">
-            {/* Dashboard Access */}
-            <DashboardAccessCard />
+          <TabsContent value="settings" className="space-y-8">
 
-            {/* Global Settings */}
-            <Card className="control-panel">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Settings className="h-5 w-5" />
-                  Global Settings
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-3">
-                  <div className="space-y-2">
-                    <Label>Demo Mode</Label>
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        checked={demo}
-                        onChange={(e) => handleDemoToggle(e.target.checked)}
-                        className="rounded"
-                      />
-                      <span className="text-sm text-muted-foreground">
-                        {demo ? "Enabled" : "Disabled"}
-                      </span>
+            {/* ── Section: Polling & Refresh ── */}
+            <section className="space-y-4">
+              <div>
+                <h3 className="text-base font-semibold flex items-center gap-2">
+                  <Timer className="h-4 w-4 text-blue-500" />
+                  Polling & Refresh
+                </h3>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Controls how often the dashboard fetches new data from GPU hosts.
+                </p>
+              </div>
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="grid gap-6 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label className="text-sm font-medium">Auto-Refresh Interval</Label>
+                      <Select value={refreshInterval.toString()} onValueChange={handleRefreshInterval}>
+                        <SelectTrigger className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="0">Manual only</SelectItem>
+                          <SelectItem value="2000">Every 2 seconds</SelectItem>
+                          <SelectItem value="3000">Every 3 seconds</SelectItem>
+                          <SelectItem value="5000">Every 5 seconds (default)</SelectItem>
+                          <SelectItem value="10000">Every 10 seconds</SelectItem>
+                          <SelectItem value="30000">Every 30 seconds</SelectItem>
+                          <SelectItem value="60000">Every 60 seconds</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        {refreshInterval === 0
+                          ? "Auto-refresh is paused. Use the Refresh button on each host tab."
+                          : `GPU metrics, power data, and AI runtime status update every ${refreshInterval / 1000}s.`}
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg border p-3">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm font-medium">Demo Mode</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Show sample GPU data without connecting to real hosts.
+                        </p>
+                      </div>
+                      <Switch checked={demo} onCheckedChange={handleDemoToggle} />
                     </div>
                   </div>
-                  
-                  <div className="space-y-2">
-                    <Label>Refresh Interval</Label>
-                    <Select value={refreshInterval.toString()} onValueChange={handleRefreshInterval}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="0">Manual</SelectItem>
-                        <SelectItem value="2000">2 seconds</SelectItem>
-                        <SelectItem value="3000">3 seconds</SelectItem>
-                        <SelectItem value="5000">5 seconds</SelectItem>
-                        <SelectItem value="10000">10 seconds</SelectItem>
-                        <SelectItem value="30000">30 seconds</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                </CardContent>
+              </Card>
+            </section>
 
-                  <div className="space-y-2">
-                    <Label>Currency</Label>
-                    <Select value={currency.code} onValueChange={setCurrency}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CURRENCIES.map((c) => (
-                          <SelectItem key={c.code} value={c.code}>
-                            {c.symbol} — {c.name} ({c.code})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+            {/* ── Section: Display & Costs ── */}
+            <section className="space-y-4">
+              <div>
+                <h3 className="text-base font-semibold flex items-center gap-2">
+                  <DollarSign className="h-4 w-4 text-emerald-500" />
+                  Display & Costs
+                </h3>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Currency and energy rate used for power cost estimates across the dashboard.
+                </p>
+              </div>
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="grid gap-6 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label className="text-sm font-medium">Currency</Label>
+                      <Select value={currency.code} onValueChange={setCurrency}>
+                        <SelectTrigger className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CURRENCIES.map((c) => (
+                            <SelectItem key={c.code} value={c.code}>
+                              {c.symbol} — {c.name} ({c.code})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Affects all cost and energy rate displays.
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-sm font-medium">Energy Rate ({currency.symbol}/kWh)</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.12"
+                        value={energyRate || ""}
+                        onChange={(e) => handleEnergyRate(e.target.value)}
+                        className="h-9"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Your electricity cost per kilowatt-hour. Used to estimate GPU running costs.
+                      </p>
+                    </div>
                   </div>
+                </CardContent>
+              </Card>
+            </section>
 
-                  <div className="space-y-2">
-                    <Label>Energy Rate ({currency.symbol}/kWh)</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      placeholder="0.12"
-                      value={energyRate || ""}
-                      onChange={(e) => handleEnergyRate(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            {/* ── Section: Security ── */}
+            <section className="space-y-4">
+              <div>
+                <h3 className="text-base font-semibold flex items-center gap-2">
+                  <Lock className="h-4 w-4 text-amber-500" />
+                  Security
+                </h3>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Protect this dashboard with a password. Stored locally in your browser.
+                </p>
+              </div>
+              <DashboardAccessCard />
+            </section>
 
-            {/* GPU Host Management */}
+            {/* ── Section: GPU Hosts ── */}
             {!demo && (
-              <HostManager 
-                hosts={hosts} 
-                setHosts={(newHosts) => {
-                  setHosts(newHosts);
-                  // Trigger immediate data fetch for new hosts
-                  if (newHosts.length > hosts.length) {
-                    fetchAllHostsData();
-                  }
-                }}
-                onHostStatusChange={() => {}}
-                hostsAiInfo={Object.fromEntries(
-                  hostsData.map(h => [h.url, { ollama: h.ollama, sglang: h.sglang }])
-                )}
-              />
+              <section className="space-y-4">
+                <div>
+                  <h3 className="text-base font-semibold flex items-center gap-2">
+                    <Cpu className="h-4 w-4 text-purple-500" />
+                    GPU Hosts
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-0.5">
+                    Manage the GPU exporter endpoints this dashboard connects to.
+                  </p>
+                </div>
+                <HostManager 
+                  hosts={hosts} 
+                  setHosts={(newHosts) => {
+                    setHosts(newHosts);
+                    if (newHosts.length > hosts.length) {
+                      fetchAllHostsData();
+                    }
+                  }}
+                  onHostStatusChange={() => {}}
+                  hostsAiInfo={Object.fromEntries(
+                    hostsData.map(h => [h.url, { ollama: h.ollama, sglang: h.sglang }])
+                  )}
+                />
+              </section>
             )}
 
-            {/* Exporter Configuration — auth, monitoring, network */}
-            {!demo && <ConfigPanel hosts={hosts} />}
+            {/* ── Section: Exporter Configuration ── */}
+            {!demo && hosts.length > 0 && (
+              <section className="space-y-4">
+                <ConfigPanel hosts={hosts} />
+              </section>
+            )}
 
-            {/* System Status — auth, persistence, features per host */}
-            {!demo && <SystemStatus hosts={hosts} />}
+            {/* ── Section: System Status ── */}
+            {!demo && hosts.length > 0 && (
+              <section className="space-y-4">
+                <SystemStatus hosts={hosts} />
+              </section>
+            )}
           </TabsContent>
         </Tabs>
       </main>
@@ -900,7 +961,7 @@ export default function Dashboard() {
       <footer className="border-t bg-card/50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between text-sm text-muted-foreground">
-            <div>Accelera v2.0 - High-Performance GPU Acceleration Platform</div>
+            <div>Accelera v2.1.0 — GPU Monitoring Platform</div>
             <div className="flex items-center space-x-4">
               {(totalGpus > 0 || totalAiModels > 0) && (
                 <div className="flex items-center gap-4">
@@ -928,6 +989,7 @@ function DashboardAccessCard() {
   const { authEnabled, logout, setPassword, clearPassword } = useAuth();
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
+  const [showPass, setShowPass] = useState(false);
 
   const handleSetPassword = async () => {
     if (!newPass || newPass !== confirmPass) {
@@ -937,102 +999,89 @@ function DashboardAccessCard() {
     await setPassword(newPass);
     setNewPass("");
     setConfirmPass("");
-    toast.success("Dashboard password set");
+    setShowPass(false);
+    toast.success(authEnabled ? "Password updated" : "Dashboard password set");
   };
 
   const handleRemovePassword = () => {
     clearPassword();
-    toast.success("Dashboard password removed — access is now open");
+    toast.success("Password removed — dashboard is now open");
   };
 
   return (
-    <Card className="control-panel">
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between">
-          <span className="flex items-center gap-2">
-            <Lock className="h-5 w-5" />
-            Dashboard Access
-          </span>
+    <Card>
+      <CardContent className="pt-6 space-y-4">
+        {/* Status row */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm">
+            {authEnabled ? (
+              <>
+                <div className="h-2 w-2 rounded-full bg-green-500" />
+                <span className="font-medium">Password protection is active</span>
+              </>
+            ) : (
+              <>
+                <div className="h-2 w-2 rounded-full bg-yellow-500" />
+                <span className="font-medium text-muted-foreground">No password set — dashboard is open to anyone with the URL</span>
+              </>
+            )}
+          </div>
           {authEnabled && (
-            <Button variant="outline" size="sm" onClick={logout} className="gap-1.5">
-              <LogOut className="h-3.5 w-3.5" />
+            <Button variant="outline" size="sm" onClick={logout} className="gap-1.5 h-7 text-xs">
+              <LogOut className="h-3 w-3" />
               Sign Out
             </Button>
           )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {authEnabled ? (
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Dashboard is password-protected. You can change or remove the password below.
-            </p>
-            <div className="grid gap-3 md:grid-cols-3 items-end">
-              <div className="space-y-1">
-                <Label>New Password</Label>
-                <Input
-                  type="password"
-                  value={newPass}
-                  onChange={(e) => setNewPass(e.target.value)}
-                  placeholder="New password"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Confirm Password</Label>
-                <Input
-                  type="password"
-                  value={confirmPass}
-                  onChange={(e) => setConfirmPass(e.target.value)}
-                  placeholder="Confirm password"
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  onClick={handleSetPassword}
-                  disabled={!newPass || !confirmPass}
-                >
-                  Change Password
-                </Button>
-                <Button variant="destructive" onClick={handleRemovePassword}>
-                  Remove
-                </Button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              No password is set. Anyone with access to this URL can view the dashboard.
-              Set a password to require authentication.
-            </p>
-            <div className="grid gap-3 md:grid-cols-3 items-end">
-              <div className="space-y-1">
-                <Label>Password</Label>
-                <Input
-                  type="password"
-                  value={newPass}
-                  onChange={(e) => setNewPass(e.target.value)}
-                  placeholder="Choose a password"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Confirm Password</Label>
-                <Input
-                  type="password"
-                  value={confirmPass}
-                  onChange={(e) => setConfirmPass(e.target.value)}
-                  placeholder="Confirm password"
-                />
-              </div>
-              <Button
-                onClick={handleSetPassword}
-                disabled={!newPass || !confirmPass}
+        </div>
+
+        {/* Password form */}
+        <div className="grid gap-3 md:grid-cols-2 items-end">
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">
+              {authEnabled ? "New Password" : "Password"}
+            </Label>
+            <div className="relative">
+              <Input
+                type={showPass ? "text" : "password"}
+                value={newPass}
+                onChange={(e) => setNewPass(e.target.value)}
+                placeholder={authEnabled ? "Enter new password" : "Choose a password"}
+                className="h-9 pr-9"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPass(!showPass)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
-                Set Password
-              </Button>
+                {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
             </div>
           </div>
-        )}
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">Confirm Password</Label>
+            <Input
+              type={showPass ? "text" : "password"}
+              value={confirmPass}
+              onChange={(e) => setConfirmPass(e.target.value)}
+              placeholder="Confirm password"
+              className="h-9"
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            onClick={handleSetPassword}
+            disabled={!newPass || !confirmPass}
+          >
+            {authEnabled ? "Update Password" : "Set Password"}
+          </Button>
+          {authEnabled && (
+            <Button variant="ghost" size="sm" onClick={handleRemovePassword} className="text-destructive hover:text-destructive">
+              Remove Password
+            </Button>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

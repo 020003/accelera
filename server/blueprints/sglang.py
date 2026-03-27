@@ -22,7 +22,7 @@ def check_sglang_availability(host_url: str) -> dict:
         timeout_s = SGLANG_DISCOVER_TIMEOUT / 1000
 
         # Ports to try: configured default, then common alternatives
-        ports = {str(SGLANG_DEFAULT_PORT), "30000", "8000", str(parsed.port or "5000")}
+        ports = {str(SGLANG_DEFAULT_PORT), "30000", "8000", "8899", "8080", "8888", str(parsed.port or "5000")}
 
         for port in ports:
             sglang_url = f"{parsed.scheme}://{hostname}:{port}"
