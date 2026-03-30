@@ -1,10 +1,13 @@
 """Health check blueprint."""
 
+import logging
 import os
 import socket
 from datetime import datetime
 
 from flask import Blueprint, jsonify
+
+log = logging.getLogger(__name__)
 
 from config import VERSION, cfg, cfg_bool, cfg_int
 
@@ -21,15 +24,18 @@ def _db_status() -> dict:
         try:
             import sqlite3
             conn = sqlite3.connect(db_path, timeout=2)
-            for table in ("gpu_history", "hosts", "alert_rules", "alert_events", "workload_events"):
+            _ALLOWED_TABLES = ("gpu_history", "hosts", "alert_rules", "alert_events", "workload_events")
+            for table in _ALLOWED_TABLES:
                 try:
-                    count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                    count = conn.execute(
+                        "SELECT COUNT(*) FROM " + table
+                    ).fetchone()[0]
                     row_counts[table] = count
                 except Exception:
                     row_counts[table] = -1
             conn.close()
         except Exception:
-            pass
+            log.debug("Failed to read DB status", exc_info=True)
     return {
         "enabled": True,
         "path": db_path,

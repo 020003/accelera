@@ -138,9 +138,9 @@ export function GPU3DHeatmap({ data }: { data?: HeatmapData }) {
     setPlotData([surface]);
   }, [selectedMetric, data]);
   
-  const fontColor = themeLight ? '#1e293b' : '#e2e8f0';
-  const gridColor = themeLight ? 'rgba(100,116,139,0.18)' : 'rgba(148,163,184,0.15)';
-  const sceneBg = themeLight ? '#f8fafc' : 'rgba(11,18,32,0.6)';
+  const fontColor = getComputedStyle(document.documentElement).getPropertyValue('--heatmap-font').trim() || (themeLight ? '#1e293b' : '#e2e8f0');
+  const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--heatmap-grid').trim() || (themeLight ? 'rgba(100,116,139,0.18)' : 'rgba(148,163,184,0.15)');
+  const sceneBg = getComputedStyle(document.documentElement).getPropertyValue('--heatmap-bg').trim() || (themeLight ? '#f8fafc' : 'rgba(11,18,32,0.6)');
 
   const layout = {
     title: {

@@ -40,6 +40,31 @@
     --gpu-purple: 154, 77, 255; /* Accelera Violet */
     --gpu-red: 239, 68, 68;
     --gpu-yellow: 250, 204, 21;
+
+    /* Chart Colors (hex for Recharts / Plotly / SVG) */
+    --chart-blue: #3b82f6;
+    --chart-violet: #8b5cf6;
+    --chart-green: #22c55e;
+    --chart-orange: #f97316;
+    --chart-red: #ef4444;
+    --chart-amber: #f59e0b;
+    --chart-lime: #84cc16;
+    --chart-purple: #a855f7;
+    --chart-gray: #6b7280;
+
+    /* Topology Colors */
+    --topo-nvlink: #10b981;
+    --topo-pcie-sys: #ef4444;
+    --topo-pcie-node: #f59e0b;
+    --topo-pcie-phb: #eab308;
+    --topo-pcie-pix: #84cc16;
+    --topo-fabric: #a855f7;
+    --topo-default: #6b7280;
+
+    /* 3D Heatmap */
+    --heatmap-font: #e2e8f0;
+    --heatmap-grid: rgba(148,163,184,0.15);
+    --heatmap-bg: rgba(11,18,32,0.6);
   }
 
   .light {
@@ -63,6 +88,31 @@
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
     --ring: 214 100% 47%;
+
+    /* Chart Colors — same hues, slightly darker for light bg */
+    --chart-blue: #2563eb;
+    --chart-violet: #7c3aed;
+    --chart-green: #16a34a;
+    --chart-orange: #ea580c;
+    --chart-red: #dc2626;
+    --chart-amber: #d97706;
+    --chart-lime: #65a30d;
+    --chart-purple: #9333ea;
+    --chart-gray: #4b5563;
+
+    /* Topology */
+    --topo-nvlink: #059669;
+    --topo-pcie-sys: #dc2626;
+    --topo-pcie-node: #d97706;
+    --topo-pcie-phb: #ca8a04;
+    --topo-pcie-pix: #65a30d;
+    --topo-fabric: #9333ea;
+    --topo-default: #4b5563;
+
+    /* 3D Heatmap */
+    --heatmap-font: #1e293b;
+    --heatmap-grid: rgba(100,116,139,0.18);
+    --heatmap-bg: #f8fafc;
   }
 
   * {
@@ -247,5 +297,29 @@
     40% { transform: translateX(8px); }
     60% { transform: translateX(-4px); }
     80% { transform: translateX(4px); }
+  }
+
+  /* Accessibility: respect reduced-motion preferences */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* Cursor: all interactive elements get pointer cursor */
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="switch"],
+  [role="checkbox"],
+  [role="radio"],
+  a[href],
+  summary,
+  [onclick],
+  select {
+    cursor: pointer;
   }
 }

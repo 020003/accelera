@@ -147,7 +147,7 @@ def _collect_ollama():
                 req_dur_sum=data["request_duration_sum"],
             )
     except Exception:
-        pass
+        log.debug("Ollama token collection failed", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +197,7 @@ def _get_sglang_model_name() -> str:
             if models:
                 return models[0].get("id", "sglang-model")
     except Exception:
-        pass
+        log.debug("Failed to fetch SGLang model name", exc_info=True)
     return "sglang-model"
 
 
@@ -321,7 +321,7 @@ def _collect_sglang():
                 )
                 return
     except Exception:
-        pass
+        log.debug("SGLang /metrics collection failed", exc_info=True)
 
     # Fallback: /get_server_info for throughput
     _collect_sglang_via_server_info()

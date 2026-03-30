@@ -317,42 +317,42 @@ const nodeTypes = {
 const connectionStyles = {
   'NVLink': {
     strokeWidth: 4,
-    stroke: '#10b981',
+    stroke: 'var(--topo-nvlink)',
     animated: true,
     label: 'NVLink',
     description: 'High-speed GPU interconnect'
   },
   'PCIe-SYS': {
     strokeWidth: 2,
-    stroke: '#ef4444',
+    stroke: 'var(--topo-pcie-sys)',
     animated: false,
     label: 'PCIe (Cross-socket)',
     description: 'PCIe traversing NUMA nodes'
   },
   'PCIe-NODE': {
     strokeWidth: 2,
-    stroke: '#f59e0b',
+    stroke: 'var(--topo-pcie-node)',
     animated: false,
     label: 'PCIe (NUMA)',
     description: 'PCIe within NUMA node'
   },
   'PCIe-PHB': {
     strokeWidth: 2,
-    stroke: '#eab308',
+    stroke: 'var(--topo-pcie-phb)',
     animated: false,
     label: 'PCIe (Host Bridge)',
     description: 'PCIe through Host Bridge'
   },
   'PCIe-PIX': {
     strokeWidth: 2,
-    stroke: '#84cc16',
+    stroke: 'var(--topo-pcie-pix)',
     animated: false,
     label: 'PCIe (Switch)',
     description: 'PCIe through single switch'
   },
   'Mellanox': {
     strokeWidth: 3,
-    stroke: '#a855f7',
+    stroke: 'var(--topo-fabric)',
     animated: true,
     strokeDasharray: '5 5',
     label: 'AI Fabric',
@@ -360,7 +360,7 @@ const connectionStyles = {
   },
   'default': {
     strokeWidth: 2,
-    stroke: '#6b7280',
+    stroke: 'var(--topo-default)',
     animated: false,
     label: 'Connection',
     description: 'Network connection'

@@ -247,7 +247,7 @@ def persist_gpu_sample(host: str, gpu_key: str, metric: str, value: float, times
         )
         db.commit()
     except Exception:
-        pass
+        log.debug("Failed to record gpu_history sample", exc_info=True)
 
 
 def prune_old_history():
@@ -258,7 +258,7 @@ def prune_old_history():
         db.execute("DELETE FROM gpu_history WHERE created_at < ?", (cutoff,))
         db.commit()
     except Exception:
-        pass
+        log.debug("Failed to prune gpu_history", exc_info=True)
 
 
 def load_history_from_db(metric: str, hours: int) -> dict:
@@ -331,7 +331,7 @@ def save_alert_event(event: dict):
         )
         db.commit()
     except Exception:
-        pass
+        log.debug("Failed to record alert event", exc_info=True)
 
 
 def load_alert_events(limit: int = 200) -> list[dict]:
@@ -504,4 +504,4 @@ def prune_old_token_snapshots():
         db.execute("DELETE FROM token_snapshots WHERE timestamp < ?", (cutoff,))
         db.commit()
     except Exception:
-        pass
+        log.debug("Failed to prune token_snapshots", exc_info=True)

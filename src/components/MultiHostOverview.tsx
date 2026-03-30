@@ -299,12 +299,12 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$" 
                   >
                     <defs>
                       <linearGradient id="fleetGenGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.4} />
-                        <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
+                        <stop offset="0%" stopColor="var(--chart-blue)" stopOpacity={0.4} />
+                        <stop offset="100%" stopColor="var(--chart-blue)" stopOpacity={0} />
                       </linearGradient>
                       <linearGradient id="fleetPtGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.3} />
-                        <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+                        <stop offset="0%" stopColor="var(--chart-violet)" stopOpacity={0.3} />
+                        <stop offset="100%" stopColor="var(--chart-violet)" stopOpacity={0} />
                       </linearGradient>
                     </defs>
                     <XAxis
@@ -332,7 +332,7 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$" 
                       type="monotone"
                       dataKey="generated"
                       name="Generated"
-                      stroke="#3b82f6"
+                      stroke="var(--chart-blue)"
                       fill="url(#fleetGenGrad)"
                       strokeWidth={1.5}
                     />
@@ -340,7 +340,7 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$" 
                       type="monotone"
                       dataKey="prompt"
                       name="Prompt"
-                      stroke="#8b5cf6"
+                      stroke="var(--chart-violet)"
                       fill="url(#fleetPtGrad)"
                       strokeWidth={1.5}
                     />
@@ -399,10 +399,10 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$" 
                           key={idx}
                           fill={
                             entry.util >= 80
-                              ? "#f97316"
+                              ? "var(--chart-orange)"
                               : entry.util >= 50
-                              ? "#3b82f6"
-                              : "#22c55e"
+                              ? "var(--chart-blue)"
+                              : "var(--chart-green)"
                           }
                           fillOpacity={0.75}
                         />

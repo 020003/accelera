@@ -152,12 +152,12 @@ export function TokenStatsCard({ stats, isLoading, hours = 24 }: TokenStatsCardP
               <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="genGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.4} />
-                    <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--chart-blue)" stopOpacity={0.4} />
+                    <stop offset="100%" stopColor="var(--chart-blue)" stopOpacity={0} />
                   </linearGradient>
                   <linearGradient id="promptGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.3} />
-                    <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--chart-violet)" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="var(--chart-violet)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <XAxis
@@ -186,7 +186,7 @@ export function TokenStatsCard({ stats, isLoading, hours = 24 }: TokenStatsCardP
                   type="monotone"
                   dataKey="generated"
                   name="Generated"
-                  stroke="#3b82f6"
+                  stroke="var(--chart-blue)"
                   fill="url(#genGrad)"
                   strokeWidth={1.5}
                 />
@@ -194,7 +194,7 @@ export function TokenStatsCard({ stats, isLoading, hours = 24 }: TokenStatsCardP
                   type="monotone"
                   dataKey="prompt"
                   name="Prompt"
-                  stroke="#8b5cf6"
+                  stroke="var(--chart-violet)"
                   fill="url(#promptGrad)"
                   strokeWidth={1.5}
                 />
