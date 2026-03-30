@@ -225,7 +225,7 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$" 
                 : undefined,
           },
           {
-            label: "24h Tokens",
+            label: `${rangeLabel} Tokens`,
             value: fmt(fleet?.summary.total_tokens ?? 0),
             icon: Hash,
             color: "text-blue-500",
