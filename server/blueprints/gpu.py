@@ -1,5 +1,6 @@
 """GPU metrics blueprint – nvidia-smi endpoint and process detection."""
 
+import logging
 import socket
 import subprocess
 from datetime import datetime
@@ -7,6 +8,8 @@ from datetime import datetime
 from flask import Blueprint, jsonify
 
 from utils import run_cmd
+
+log = logging.getLogger(__name__)
 
 gpu_bp = Blueprint("gpu", __name__)
 
@@ -22,10 +25,17 @@ def _safe_int(val: str, default: int = 0) -> int:
 
 
 def get_gpus() -> list[dict]:
-    """Query nvidia-smi for GPU metrics and attach process info."""
+    """Query nvidia-smi for GPU metrics and attach process info.
+
+    Returns an empty list if nvidia-smi is unavailable (no GPU host).
+    """
     q = ("index,uuid,name,driver_version,temperature.gpu,utilization.gpu,"
          "memory.used,memory.total,power.draw,power.limit,fan.speed")
-    out = run_cmd(f"nvidia-smi --format=csv,noheader,nounits --query-gpu={q}")
+    try:
+        out = run_cmd(f"nvidia-smi --format=csv,noheader,nounits --query-gpu={q}")
+    except Exception:
+        log.warning("nvidia-smi not available — running in no-GPU mode")
+        return []
     gpus = []
     for line in out.splitlines():
         parts = [p.strip() for p in line.split(",")]
@@ -78,6 +88,7 @@ def _add_process_info(gpus: list[dict]):
     try:
         import pynvml
         pynvml.nvmlInit()
+        log.debug("Process detection: trying NVML")
 
         for i, gpu in enumerate(gpus):
             try:
@@ -112,7 +123,7 @@ def _add_process_info(gpus: list[dict]):
         pynvml.nvmlShutdown()
 
     except Exception:
-        pass
+        log.debug("Process detection: NVML unavailable, trying fallbacks")
 
     # Method 2: nvidia-smi XML query
     if appended == 0:
@@ -234,6 +245,8 @@ def _add_process_info(gpus: list[dict]):
         except subprocess.CalledProcessError:
             pass
 
+    if appended > 0:
+        log.debug("Attached %d process(es) to %d GPU(s)", appended, len(gpus))
     return gpus
 
 

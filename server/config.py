@@ -13,6 +13,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ---------------------------------------------------------------------------
+# Version
+# ---------------------------------------------------------------------------
+VERSION = "2.1.0"
+
+# ---------------------------------------------------------------------------
 # Defaults — env vars set the baseline
 # ---------------------------------------------------------------------------
 _DEFAULTS: dict[str, str] = {
@@ -28,9 +33,12 @@ _DEFAULTS: dict[str, str] = {
     "GPU_COLLECT_INTERVAL": os.getenv("GPU_COLLECT_INTERVAL", "60"),
     "HISTORICAL_DATA_RETENTION": os.getenv("HISTORICAL_DATA_RETENTION", "168"),
     # Ollama
+    "OLLAMA_URL": os.getenv("OLLAMA_URL", os.getenv("OLLAMA_HOST", "")),
+    "OLLAMA_METRICS_URL": os.getenv("OLLAMA_METRICS_URL", ""),
     "OLLAMA_DISCOVER_TIMEOUT": os.getenv("OLLAMA_DISCOVER_TIMEOUT", "3000"),
     "OLLAMA_DEFAULT_PORT": os.getenv("OLLAMA_DEFAULT_PORT", "11434"),
     # SGLang
+    "SGLANG_URL": os.getenv("SGLANG_URL", ""),
     "SGLANG_DISCOVER_TIMEOUT": os.getenv("SGLANG_DISCOVER_TIMEOUT", "3000"),
     "SGLANG_DEFAULT_PORT": os.getenv("SGLANG_DEFAULT_PORT", "30000"),
     # Alerting
@@ -123,8 +131,11 @@ CORS_ORIGINS = _DEFAULTS["CORS_ORIGINS"]
 NVIDIA_SMI_PATH = _DEFAULTS["NVIDIA_SMI_PATH"]
 GPU_COLLECT_INTERVAL = int(_DEFAULTS["GPU_COLLECT_INTERVAL"])
 HISTORICAL_DATA_RETENTION = int(_DEFAULTS["HISTORICAL_DATA_RETENTION"])
+OLLAMA_URL = _DEFAULTS["OLLAMA_URL"]
+OLLAMA_METRICS_URL = _DEFAULTS["OLLAMA_METRICS_URL"]
 OLLAMA_DISCOVER_TIMEOUT = int(_DEFAULTS["OLLAMA_DISCOVER_TIMEOUT"])
 OLLAMA_DEFAULT_PORT = int(_DEFAULTS["OLLAMA_DEFAULT_PORT"])
+SGLANG_URL = _DEFAULTS["SGLANG_URL"]
 SGLANG_DISCOVER_TIMEOUT = int(_DEFAULTS["SGLANG_DISCOVER_TIMEOUT"])
 SGLANG_DEFAULT_PORT = int(_DEFAULTS["SGLANG_DEFAULT_PORT"])
 ALERT_WEBHOOK_URL = _DEFAULTS["ALERT_WEBHOOK_URL"]

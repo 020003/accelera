@@ -547,33 +547,23 @@ export default function Dashboard() {
               <img 
                 src="/logo.png" 
                 alt="Accelera" 
-                className="h-12 w-auto"
+                className="h-9 sm:h-12 w-auto"
               />
               <div>
-                <h1 className="text-2xl font-bold text-foreground">Accelera</h1>
-                <p className="text-sm text-muted-foreground">
+                <h1 className="text-xl sm:text-2xl font-bold text-foreground">Accelera</h1>
+                <p className="text-sm text-muted-foreground hidden sm:block">
                   High-Performance GPU Acceleration Platform
                 </p>
               </div>
             </div>
             
-            <div className="flex items-center space-x-4">
-              <div className="text-sm text-muted-foreground">
-                <span className="font-medium">GPU Hosts:</span> {connectedHosts.length}/{hostsData.length}
-              </div>
-              <div className="text-sm text-muted-foreground">
-                <span className="font-medium">GPUs:</span> {totalGpus}
-              </div>
-              <div className="text-sm text-muted-foreground">
-                <span className="font-medium">Ollama:</span> {hostsWithOllama}/{hostsData.length}
-              </div>
-              {hostsWithSglang > 0 && (
-                <div className="text-sm text-muted-foreground">
-                  <span className="font-medium">SGLang:</span> {hostsWithSglang}/{hostsData.length}
-                </div>
-              )}
-              <div className="text-sm text-muted-foreground">
-                <span className="font-medium">AI Models:</span> {totalAiModels}
+            <div className="flex items-center gap-2 sm:gap-4">
+              <div className="hidden lg:flex items-center gap-4 text-sm text-muted-foreground">
+                <span><span className="font-medium">Hosts:</span> {connectedHosts.length}/{hostsData.length}</span>
+                <span><span className="font-medium">GPUs:</span> {totalGpus}</span>
+                {totalAiModels > 0 && (
+                  <span><span className="font-medium">AI Models:</span> {totalAiModels}</span>
+                )}
               </div>
               <Button
                 variant="ghost"
@@ -594,7 +584,6 @@ export default function Dashboard() {
                 }`} />
                 {(connectedHosts.length > 0 || hostsWithOllama > 0 || hostsWithSglang > 0) ? "Online" : "Offline"}
               </div>
-              
             </div>
           </div>
         </div>
@@ -604,7 +593,7 @@ export default function Dashboard() {
 
         {/* Tabbed Interface */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="flex w-full flex-wrap">
+          <TabsList className="flex w-full overflow-x-auto">
             <TabsTrigger value="overview" className="flex items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               Overview
@@ -644,14 +633,36 @@ export default function Dashboard() {
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
-            <MultiHostOverview hostsData={hostsData} energyRate={energyRate} currencySymbol={currency.symbol} />
-            <PowerUsageChart 
-              hosts={hosts} 
-              hostData={hostDataMap} 
-              refreshInterval={refreshInterval}
-              energyRate={energyRate}
-              currencySymbol={currency.symbol}
-            />
+            {hostsData.length === 0 && !demo ? (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center py-20 text-center">
+                  <div className="p-4 bg-muted/50 rounded-full mb-4">
+                    <Monitor className="h-10 w-10 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-lg font-semibold mb-1">No GPU hosts connected</h3>
+                  <p className="text-sm text-muted-foreground max-w-md mb-4">
+                    Add a GPU exporter endpoint in the <strong>Settings</strong> tab to start monitoring.
+                    <br />
+                    <span className="text-xs">Example: <code className="bg-muted px-1.5 py-0.5 rounded text-[11px]">http://gpu-host:5000/nvidia-smi.json</code></span>
+                  </p>
+                  <Button variant="outline" size="sm" className="gap-2" onClick={() => setActiveTab("settings")}>
+                    <Cog className="h-4 w-4" />
+                    Open Settings
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                <MultiHostOverview hostsData={hostsData} energyRate={energyRate} currencySymbol={currency.symbol} />
+                <PowerUsageChart 
+                  hosts={hosts} 
+                  hostData={hostDataMap} 
+                  refreshInterval={refreshInterval}
+                  energyRate={energyRate}
+                  currencySymbol={currency.symbol}
+                />
+              </>
+            )}
           </TabsContent>
 
           {/* Advanced Visualizations Tab */}
@@ -959,23 +970,19 @@ export default function Dashboard() {
 
       {/* Footer */}
       <footer className="border-t bg-card/50">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between text-sm text-muted-foreground">
+        <div className="container mx-auto px-4 py-3 sm:py-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-1 text-xs sm:text-sm text-muted-foreground">
             <div>Accelera v2.1.0 — GPU Monitoring Platform</div>
-            <div className="flex items-center space-x-4">
-              {(totalGpus > 0 || totalAiModels > 0) && (
-                <div className="flex items-center gap-4">
-                  {totalGpus > 0 && (
-                    <span>
-                      {totalGpus} GPU{totalGpus !== 1 ? 's' : ''} across {connectedHosts.length} host{connectedHosts.length !== 1 ? 's' : ''}
-                    </span>
-                  )}
-                  {totalAiModels > 0 && (
-                    <span>
-                      {totalAiModels} AI model{totalAiModels !== 1 ? 's' : ''} on {hostsWithOllama + hostsWithSglang} host{(hostsWithOllama + hostsWithSglang) !== 1 ? 's' : ''}
-                    </span>
-                  )}
-                </div>
+            <div className="hidden sm:flex items-center gap-4">
+              {totalGpus > 0 && (
+                <span>
+                  {totalGpus} GPU{totalGpus !== 1 ? 's' : ''} across {connectedHosts.length} host{connectedHosts.length !== 1 ? 's' : ''}
+                </span>
+              )}
+              {totalAiModels > 0 && (
+                <span>
+                  {totalAiModels} AI model{totalAiModels !== 1 ? 's' : ''}
+                </span>
               )}
             </div>
           </div>

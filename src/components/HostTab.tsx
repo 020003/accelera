@@ -314,7 +314,7 @@ export function HostTab({
                 </ToggleGroup>
               </div>
               {tokenStats ? (
-                <TokenStatsCard stats={tokenStats} isLoading={tokenLoading} />
+                <TokenStatsCard stats={tokenStats} isLoading={tokenLoading} hours={tokenHours} />
               ) : tokenLoading ? (
                 <Card>
                   <CardContent className="py-12 text-center text-muted-foreground text-sm">

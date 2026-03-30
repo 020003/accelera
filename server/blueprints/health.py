@@ -6,7 +6,7 @@ from datetime import datetime
 
 from flask import Blueprint, jsonify
 
-from config import cfg, cfg_bool, cfg_int
+from config import VERSION, cfg, cfg_bool, cfg_int
 
 health_bp = Blueprint("health", __name__)
 
@@ -51,7 +51,7 @@ def health():
     return jsonify({
         "status": "ok",
         "platform": "Accelera",
-        "version": "2.1",
+        "version": VERSION,
         "hostname": socket.gethostname(),
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "persistence": _db_status(),

@@ -4,32 +4,36 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+        VITE_BACKEND_HOSTS: ${VITE_BACKEND_HOSTS:-}
     restart: unless-stopped
     ports:
-      - "8080:8080"
-    environment:
-      - HOST=0.0.0.0
-      - VITE_PORT=8080
-      - VITE_API_URL=${VITE_API_URL:-http://localhost:5000}
-      - VITE_BACKEND_HOSTS=${VITE_BACKEND_HOSTS:-http://localhost:5000}
-    volumes:
-      - .:/app
-      - /app/node_modules
+      - "${FRONTEND_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   gpu-exporter:
     build:
       context: ./server
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "${EXPORTER_PORT:-5000}:5000"
+    env_file:
+      - path: .env
+        required: false
     environment:
       - FLASK_ENV=production
       - FLASK_HOST=0.0.0.0
       - FLASK_PORT=5000
       - CORS_ORIGINS=*
       - PROMETHEUS_ENABLED=true
-      - GPU_COLLECT_INTERVAL=60
-      - LOG_LEVEL=INFO
+      - GPU_COLLECT_INTERVAL=${GPU_COLLECT_INTERVAL:-60}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     deploy:
@@ -41,6 +45,8 @@ services:
               capabilities: [gpu]
     pid: "host"
     privileged: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - /proc:/host/proc:ro
       - accelera-data:/app/data

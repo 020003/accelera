@@ -45,6 +45,10 @@ function getProgressVariant(value: number, type: 'temp' | 'util' | 'memory'): 'n
   return 'normal';
 }
 
+function fmtMem(mb: number): string {
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
+}
+
 export const GpuCard = memo(function GpuCard({ gpu, energyRate = 0, currencySymbol = "$" }: GpuCardProps) {
   const memoryUsedPercent = Math.round((gpu.memory.used / gpu.memory.total) * 100);
   const powerUsedPercent = Math.round((gpu.power.draw / gpu.power.limit) * 100);
@@ -105,7 +109,7 @@ export const GpuCard = memo(function GpuCard({ gpu, energyRate = 0, currencySymb
               <span className="text-sm font-medium">Memory</span>
             </div>
             <span className="text-sm font-mono font-bold">
-              {gpu.memory.used} / {gpu.memory.total} MB ({memoryUsedPercent}%)
+              {fmtMem(gpu.memory.used)} / {fmtMem(gpu.memory.total)} ({memoryUsedPercent}%)
             </span>
           </div>
           <div className="progress-bar">

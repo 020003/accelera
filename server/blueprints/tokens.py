@@ -1,30 +1,64 @@
 """Token usage statistics – scrapes Ollama & SGLang Prometheus metrics.
 
-Periodically reads ``/metrics`` from the local Ollama instance
-(localhost:11434) and SGLang instances, storing cumulative counter
-snapshots in SQLite.  The API endpoint returns delta-based stats for a
-configurable window.
+Periodically reads ``/metrics`` from Ollama and SGLang instances,
+storing cumulative counter snapshots in SQLite.  The API endpoint
+returns delta-based stats for a configurable window.
+
+Configuration (all optional, set in environment or docker-compose):
+
+  ``OLLAMA_METRICS_URL``
+      Full URL to an Ollama Prometheus metrics endpoint, e.g.
+      ``http://host.docker.internal:11434/metrics``.  Use this when
+      metrics are served by a separate sidecar (like *ollama-metrics*).
+      Falls back to ``OLLAMA_URL`` + ``/metrics`` if unset.
+
+  ``OLLAMA_URL``
+      Ollama API base URL.  Used for ``/metrics`` fallback and model
+      listing.  Also accepts legacy ``OLLAMA_HOST``.
+
+  ``SGLANG_URL``
+      SGLang base URL.  Used for ``/metrics`` and ``/get_server_info``
+      fallback when Prometheus metrics are unavailable.
 
 Endpoints:
   GET /api/tokens/stats?hours=24  — aggregated token statistics
 """
 
-import os
+import logging
 import re
 
 import requests as http_requests
 from flask import Blueprint, jsonify, request
 
 import storage
-from config import SGLANG_DEFAULT_PORT
+from config import OLLAMA_URL, OLLAMA_METRICS_URL, SGLANG_URL, SGLANG_DEFAULT_PORT
 
+log = logging.getLogger(__name__)
 tokens_bp = Blueprint("tokens", __name__)
+
+
+def _resolve_ollama_metrics_url() -> str:
+    """Determine the Ollama Prometheus metrics URL."""
+    if OLLAMA_METRICS_URL:
+        return OLLAMA_METRICS_URL.rstrip("/")
+    if OLLAMA_URL:
+        return f"{OLLAMA_URL.rstrip('/')}/metrics"
+    return "http://localhost:11434/metrics"
+
+
+def _resolve_sglang_base_url() -> str:
+    """Determine the SGLang base URL."""
+    if SGLANG_URL:
+        return SGLANG_URL.rstrip("/")
+    return f"http://localhost:{SGLANG_DEFAULT_PORT}"
+
+
+_ollama_metrics_url = _resolve_ollama_metrics_url()
+_sglang_base_url = _resolve_sglang_base_url()
 
 # ---------------------------------------------------------------------------
 # Ollama metrics
 # ---------------------------------------------------------------------------
-_OLLAMA_BASE = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
-_OLLAMA_METRICS_URL = f"{_OLLAMA_BASE}/metrics"
 
 # Pre-compiled patterns for the Prometheus text format
 _RE_GENERATED = re.compile(
@@ -98,7 +132,7 @@ def _parse_ollama_metrics(text: str) -> dict[str, dict]:
 def _collect_ollama():
     """Scrape Ollama /metrics and record a snapshot per model."""
     try:
-        resp = http_requests.get(_OLLAMA_METRICS_URL, timeout=3)
+        resp = http_requests.get(_ollama_metrics_url, timeout=3)
         if resp.status_code != 200:
             return
         models = _parse_ollama_metrics(resp.text)
@@ -119,9 +153,6 @@ def _collect_ollama():
 # ---------------------------------------------------------------------------
 # SGLang metrics
 # ---------------------------------------------------------------------------
-_SGLANG_HOST = os.environ.get("SGLANG_HOST", "http://localhost").rstrip("/")
-_SGLANG_PORT = os.environ.get("SGLANG_PORT", str(SGLANG_DEFAULT_PORT))
-_SGLANG_METRICS_URL = f"{_SGLANG_HOST}:{_SGLANG_PORT}/metrics"
 
 # SGLang Prometheus metric patterns (covers multiple SGLang versions)
 _RE_SG_GEN = re.compile(
@@ -158,7 +189,7 @@ def _get_sglang_model_name() -> str:
     """Best-effort fetch of the model name from SGLang /v1/models."""
     try:
         resp = http_requests.get(
-            f"{_SGLANG_HOST}:{_SGLANG_PORT}/v1/models", timeout=2
+            f"{_sglang_base_url}/v1/models", timeout=2
         )
         if resp.status_code == 200:
             data = resp.json()
@@ -225,27 +256,75 @@ def _parse_sglang_metrics(text: str) -> dict | None:
     }
 
 
-def _collect_sglang():
-    """Scrape SGLang /metrics and record a snapshot."""
+def _collect_sglang_via_server_info() -> bool:
+    """Fallback: extract throughput from ``/get_server_info`` when ``/metrics`` is unavailable.
+
+    SGLang exposes ``last_gen_throughput`` (tokens/s) inside
+    ``internal_states[0]``.  We record a synthetic snapshot so
+    the frontend at least shows live throughput.
+    Returns True if data was recorded.
+    """
     try:
-        resp = http_requests.get(_SGLANG_METRICS_URL, timeout=3)
+        resp = http_requests.get(f"{_sglang_base_url}/get_server_info", timeout=3)
         if resp.status_code != 200:
-            return
-        data = _parse_sglang_metrics(resp.text)
-        if data is None:
-            return
+            return False
+        info = resp.json()
+
+        # Extract throughput from internal_states
+        throughput = 0.0
+        internal = info.get("internal_states", [])
+        if isinstance(internal, list) and internal:
+            throughput = internal[0].get("last_gen_throughput", 0.0)
+        elif isinstance(info, dict):
+            throughput = info.get("last_gen_throughput", 0.0)
+
+        if not throughput:
+            return False
+
         model_name = f"[sglang] {_get_sglang_model_name()}"
+        # Record a synthetic snapshot: throughput goes into tpt fields
+        # so the stats aggregator can compute TPS.
         storage.record_token_snapshot(
             model=model_name,
-            prompt_tokens=data["prompt_tokens"],
-            generated_tokens=data["generated_tokens"],
-            request_count=data["request_count"],
-            tpt_sum=data["tpt_sum"],
-            tpt_count=data["tpt_count"],
-            req_dur_sum=data["request_duration_sum"],
+            prompt_tokens=0,
+            generated_tokens=int(throughput),  # cumulative-like: current TPS
+            request_count=0,
+            tpt_sum=1.0 / throughput if throughput > 0 else 0.0,
+            tpt_count=1,
+            req_dur_sum=0.0,
         )
+        return True
+    except Exception:
+        return False
+
+
+def _collect_sglang():
+    """Scrape SGLang /metrics and record a snapshot.
+
+    Falls back to ``/get_server_info`` if ``/metrics`` is not available
+    (SGLang needs ``--enable-metrics`` to expose Prometheus metrics).
+    """
+    try:
+        resp = http_requests.get(f"{_sglang_base_url}/metrics", timeout=3)
+        if resp.status_code == 200:
+            data = _parse_sglang_metrics(resp.text)
+            if data is not None:
+                model_name = f"[sglang] {_get_sglang_model_name()}"
+                storage.record_token_snapshot(
+                    model=model_name,
+                    prompt_tokens=data["prompt_tokens"],
+                    generated_tokens=data["generated_tokens"],
+                    request_count=data["request_count"],
+                    tpt_sum=data["tpt_sum"],
+                    tpt_count=data["tpt_count"],
+                    req_dur_sum=data["request_duration_sum"],
+                )
+                return
     except Exception:
         pass
+
+    # Fallback: /get_server_info for throughput
+    _collect_sglang_via_server_info()
 
 
 # ---------------------------------------------------------------------------

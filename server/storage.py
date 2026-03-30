@@ -6,6 +6,7 @@ so that historical data survives backend restarts.
 """
 
 import json
+import logging
 import os
 import sqlite3
 import threading
@@ -15,6 +16,8 @@ from datetime import datetime
 from contextlib import contextmanager
 
 from config import DATA_DIR, HISTORICAL_DATA_RETENTION
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # In-memory stores (fast path)
@@ -42,6 +45,17 @@ def _get_db() -> sqlite3.Connection:
         _local.conn.execute("PRAGMA busy_timeout=5000")
         _local.conn.row_factory = sqlite3.Row
     return _local.conn
+
+
+def _close_db():
+    """Close the thread-local connection so the next _get_db() reconnects."""
+    conn = getattr(_local, "conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        _local.conn = None
 
 
 def init_db():
@@ -356,8 +370,11 @@ def record_token_snapshot(model: str, prompt_tokens: int, generated_tokens: int,
              request_count, tpt_sum, tpt_count, req_dur_sum),
         )
         db.commit()
+    except sqlite3.OperationalError:
+        log.exception("Failed to record token snapshot for model=%s (recycling connection)", model)
+        _close_db()
     except Exception:
-        pass
+        log.exception("Failed to record token snapshot for model=%s", model)
 
 
 def get_token_stats(hours: int = 24) -> dict:
@@ -365,7 +382,7 @@ def get_token_stats(hours: int = 24) -> dict:
     cutoff = time.time() - hours * 3600
     db = _get_db()
 
-    # -- per-model totals (latest snapshot minus earliest in window) --------
+    # -- per-model totals (deltas within window + cumulative from latest) ----
     models_raw = db.execute(
         "SELECT model, "
         "  MIN(generated_tokens) AS gen_min, MAX(generated_tokens) AS gen_max, "
@@ -384,6 +401,9 @@ def get_token_stats(hours: int = 24) -> dict:
     total_prompt = 0
     total_requests = 0
     total_duration = 0.0
+    cumulative_generated = 0
+    cumulative_prompt = 0
+    cumulative_requests = 0
     for r in models_raw:
         gen = max(r["gen_max"] - r["gen_min"], 0)
         pt = max(r["pt_max"] - r["pt_min"], 0)
@@ -397,11 +417,17 @@ def get_token_stats(hours: int = 24) -> dict:
             "requests": rc,
             "total_duration_sec": round(dur, 1),
             "avg_tokens_per_sec": round(tps, 1),
+            "cumulative_generated": r["gen_max"],
+            "cumulative_prompt": r["pt_max"],
+            "cumulative_requests": r["rc_max"],
         }
         total_generated += gen
         total_prompt += pt
         total_requests += rc
         total_duration += dur
+        cumulative_generated += r["gen_max"]
+        cumulative_prompt += r["pt_max"]
+        cumulative_requests += r["rc_max"]
 
     # -- time-series (5-min buckets) ----------------------------------------
     bucket_sec = 300
@@ -460,6 +486,10 @@ def get_token_stats(hours: int = 24) -> dict:
             "total_requests": total_requests,
             "total_duration_sec": round(total_duration, 1),
             "current_tps": round(current_tps, 1),
+            "cumulative_generated": cumulative_generated,
+            "cumulative_prompt": cumulative_prompt,
+            "cumulative_tokens": cumulative_generated + cumulative_prompt,
+            "cumulative_requests": cumulative_requests,
         },
         "models": models,
         "history": history,

@@ -95,7 +95,7 @@ export function GpuEventsPanel({ hostUrl }: GpuEventsPanelProps) {
           <CardContent className="py-8 text-center">
             <div className="flex flex-col items-center gap-2">
               <Info className="h-8 w-8 text-green-500" />
-              <p className="font-medium text-green-600">All Clear</p>
+              <p className="font-medium text-emerald-500">All Clear</p>
               <p className="text-sm text-muted-foreground">
                 No GPU errors, throttling, or ECC issues detected.
               </p>

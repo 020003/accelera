@@ -10,6 +10,10 @@ export interface FleetTokenStats {
     total_requests: number;
     total_duration_sec: number;
     current_tps: number;
+    cumulative_generated: number;
+    cumulative_prompt: number;
+    cumulative_tokens: number;
+    cumulative_requests: number;
   };
   models: Record<string, TokenModelStats>;
   history: TokenHistoryPoint[];
@@ -45,7 +49,10 @@ export function useFleetTokenStats(
     totalPt = 0,
     totalReq = 0,
     totalDur = 0,
-    totalTps = 0;
+    totalTps = 0,
+    cumGen = 0,
+    cumPt = 0,
+    cumReq = 0;
 
   for (const q of queries) {
     if (!q.data) continue;
@@ -56,8 +63,11 @@ export function useFleetTokenStats(
     totalReq += data.summary.total_requests;
     totalDur += data.summary.total_duration_sec;
     totalTps += data.summary.current_tps;
+    cumGen += data.summary.cumulative_generated ?? 0;
+    cumPt += data.summary.cumulative_prompt ?? 0;
+    cumReq += data.summary.cumulative_requests ?? 0;
 
-    for (const [model, stats] of Object.entries(data.models)) {
+    for (const [model, stats] of Object.entries(data.models) as [string, TokenModelStats][]) {
       if (!mergedModels[model]) {
         mergedModels[model] = { ...stats };
       } else {
@@ -65,6 +75,9 @@ export function useFleetTokenStats(
         mergedModels[model].prompt_tokens += stats.prompt_tokens;
         mergedModels[model].requests += stats.requests;
         mergedModels[model].total_duration_sec += stats.total_duration_sec;
+        mergedModels[model].cumulative_generated += stats.cumulative_generated ?? 0;
+        mergedModels[model].cumulative_prompt += stats.cumulative_prompt ?? 0;
+        mergedModels[model].cumulative_requests += stats.cumulative_requests ?? 0;
         // weighted avg would be better but simple avg is fine for overview
         mergedModels[model].avg_tokens_per_sec = Math.round(
           (mergedModels[model].avg_tokens_per_sec + stats.avg_tokens_per_sec) / 2
@@ -100,6 +113,10 @@ export function useFleetTokenStats(
       total_requests: totalReq,
       total_duration_sec: Math.round(totalDur * 10) / 10,
       current_tps: Math.round(totalTps * 10) / 10,
+      cumulative_generated: cumGen,
+      cumulative_prompt: cumPt,
+      cumulative_tokens: cumGen + cumPt,
+      cumulative_requests: cumReq,
     },
     models: mergedModels,
     history,

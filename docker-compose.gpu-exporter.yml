@@ -5,19 +5,36 @@ services:
       context: ./server
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "${EXPORTER_PORT:-5000}:5000"
+    env_file:
+      - path: .env
+        required: false
     environment:
       - FLASK_ENV=production
       - FLASK_HOST=0.0.0.0
       - FLASK_PORT=5000
-      - CORS_ORIGINS=*
-      - PROMETHEUS_ENABLED=true
-      - GPU_COLLECT_INTERVAL=60
-      - LOG_LEVEL=INFO
-      - OLLAMA_HOST=http://host.docker.internal:11434
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - PROMETHEUS_ENABLED=${PROMETHEUS_ENABLED:-true}
+      - GPU_COLLECT_INTERVAL=${GPU_COLLECT_INTERVAL:-60}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # ── AI Runtime Integration ──
+      # Set these to skip auto-discovery and connect directly.
+      # Use host.docker.internal to reach services on the Docker host.
+      # Leave blank or remove to auto-discover via port scanning.
+      # - OLLAMA_URL=http://host.docker.internal:11434
+      # - SGLANG_URL=http://host.docker.internal:30000
+      # If Ollama Prometheus metrics are on a different service/port
+      # (e.g. ollama-metrics sidecar), set this explicitly:
+      # - OLLAMA_METRICS_URL=http://host.docker.internal:11434/metrics
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-    # For Docker Compose with NVIDIA toolkit
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    # NVIDIA Container Toolkit GPU passthrough
     deploy:
       resources:
         reservations:
@@ -27,7 +44,6 @@ services:
               capabilities: [gpu]
     # Share host PID namespace so nvidia-smi/NVML can see host processes
     pid: "host"
-    # Additional privileges for process detection
     privileged: true
     extra_hosts:
       - "host.docker.internal:host-gateway"

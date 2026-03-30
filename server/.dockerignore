@@ -1,0 +1,14 @@
+# Build context exclusions for server/Dockerfile
+__pycache__/
+*.py[cod]
+*.so
+data/
+*.db
+*.sqlite*
+.env
+.env.*
+*.log
+logs/
+.git/
+.gitignore
+*.md

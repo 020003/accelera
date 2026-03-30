@@ -368,8 +368,6 @@ function HostConfigCard({
 }
 
 export function ConfigPanel({ hosts }: ConfigPanelProps) {
-  const [applyAll, setApplyAll] = useState(false);
-
   if (hosts.length === 0) {
     return (
       <Card>

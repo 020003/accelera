@@ -148,33 +148,33 @@ export const PowerUsageChart = memo(function PowerUsageChart({
             </defs>
             <CartesianGrid 
               strokeDasharray="3 3" 
-              stroke="rgba(255, 255, 255, 0.1)"
+              stroke="hsl(var(--border))"
               vertical={false}
             />
             <XAxis 
               dataKey="time" 
-              stroke="rgba(255, 255, 255, 0.5)"
-              tick={{ fill: 'rgba(255, 255, 255, 0.7)', fontSize: 12 }}
+              stroke="hsl(var(--border))"
+              tick={{ fontSize: 12 }}
+              tickLine={false}
             />
             <YAxis 
               tickFormatter={formatYAxis}
-              stroke="rgba(255, 255, 255, 0.5)"
-              tick={{ fill: 'rgba(255, 255, 255, 0.7)', fontSize: 12 }}
+              stroke="hsl(var(--border))"
+              tick={{ fontSize: 12 }}
+              tickLine={false}
             />
             <Tooltip 
               contentStyle={{ 
-                backgroundColor: 'rgba(0, 0, 0, 0.8)', 
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                borderRadius: '8px',
-                backdropFilter: 'blur(10px)'
+                background: 'hsl(var(--popover))',
+                border: '1px solid hsl(var(--border))',
+                borderRadius: 8,
+                fontSize: 12,
               }}
               formatter={formatTooltip}
-              labelStyle={{ color: 'rgba(255, 255, 255, 0.9)' }}
             />
             <Legend 
               wrapperStyle={{ paddingTop: '20px' }}
               iconType="line"
-              formatter={(value) => <span style={{ color: 'rgba(255, 255, 255, 0.8)' }}>{value}</span>}
             />
             {hosts.map((host, index) => {
               if (!host.isConnected) return null;

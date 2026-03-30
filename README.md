@@ -131,7 +131,9 @@ All settings are via environment variables (`.env` file supported):
 | `CORS_ORIGINS` | `*` | Allowed origins (comma-separated) |
 | `GPU_COLLECT_INTERVAL` | `60` | GPU metric collection interval (seconds) |
 | `HISTORICAL_DATA_RETENTION` | `168` | Data retention (hours) |
-| `OLLAMA_HOST` | `localhost:11434` | Ollama instance address (for Docker) |
+| `OLLAMA_URL` | *(auto-discover)* | Ollama API URL (e.g. `http://host.docker.internal:11434`) |
+| `OLLAMA_METRICS_URL` | `OLLAMA_URL/metrics` | Ollama Prometheus metrics endpoint (if separate sidecar) |
+| `SGLANG_URL` | *(auto-discover)* | SGLang Runtime URL (e.g. `http://host.docker.internal:30000`) |
 
 See [`.env.example`](.env.example) for the full list.
 
@@ -176,6 +178,17 @@ See [`.env.example`](.env.example) for the full list.
 3. Open the dashboard and add each host via Settings: `http://<gpu-host>:5000/nvidia-smi.json`
 
 The frontend fetches metrics from each exporter independently and aggregates them in the browser.
+
+### Deployment Environments
+
+| Environment | AI Runtime URLs | Notes |
+|---|---|---|
+| **Docker (default)** | `http://host.docker.internal:<port>` | `extra_hosts` mapping added automatically |
+| **Bare-metal** | `http://localhost:<port>` | Run `pip install -r server/requirements.txt && python server/app.py` |
+| **Kubernetes** | `http://<service-name>.<namespace>:<port>` | Use ConfigMap/Secret for env vars |
+| **No-GPU host** | N/A | Exporter still serves Ollama/SGLang token stats with empty GPU list |
+
+Copy `.env.example` to `.env` on each host and configure as needed. The exporter auto-discovers Ollama and SGLang on common ports if URLs are not set explicitly.
 
 ---
 

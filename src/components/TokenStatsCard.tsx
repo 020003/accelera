@@ -21,6 +21,7 @@ import type { TokenStats } from "@/hooks/useTokenStats";
 interface TokenStatsCardProps {
   stats: TokenStats;
   isLoading?: boolean;
+  hours?: number;
 }
 
 function formatNumber(n: number): string {
@@ -35,15 +36,22 @@ function formatDuration(sec: number): string {
   return `${(sec / 3600).toFixed(1)}h`;
 }
 
-export function TokenStatsCard({ stats, isLoading }: TokenStatsCardProps) {
+export function TokenStatsCard({ stats, isLoading, hours = 24 }: TokenStatsCardProps) {
+  const windowLabel = hours <= 24 ? `${hours}h` : `${hours / 24}d`;
   const { summary, models, history } = stats;
   const modelNames = Object.keys(models);
 
+  const cumTokens = summary.cumulative_tokens ?? 0;
+  const cumGen = summary.cumulative_generated ?? 0;
+  const cumPt = summary.cumulative_prompt ?? 0;
+  const cumReq = summary.cumulative_requests ?? 0;
+  const hasWindowActivity = summary.total_tokens > 0;
+
   const kpis = [
     {
-      label: "Total Tokens",
-      value: formatNumber(summary.total_tokens),
-      sub: `${formatNumber(summary.total_prompt)} prompt · ${formatNumber(summary.total_generated)} generated`,
+      label: "All-time Tokens",
+      value: formatNumber(cumTokens),
+      sub: `${formatNumber(cumPt)} prompt · ${formatNumber(cumGen)} generated`,
       icon: Hash,
       color: "text-blue-500",
       bg: "bg-blue-500/10",
@@ -57,17 +65,19 @@ export function TokenStatsCard({ stats, isLoading }: TokenStatsCardProps) {
       bg: "bg-amber-500/10",
     },
     {
-      label: "Requests",
-      value: formatNumber(summary.total_requests),
-      sub: summary.total_duration_sec > 0
+      label: hasWindowActivity ? "Requests (window)" : "All-time Requests",
+      value: formatNumber(hasWindowActivity ? summary.total_requests : cumReq),
+      sub: hasWindowActivity && summary.total_duration_sec > 0
         ? `${formatDuration(summary.total_duration_sec)} total inference`
-        : "no inference recorded",
+        : hasWindowActivity
+        ? "in selected window"
+        : "since tracking started",
       icon: MessageSquare,
       color: "text-emerald-500",
       bg: "bg-emerald-500/10",
     },
     {
-      label: "Models Used",
+      label: "Models Tracked",
       value: modelNames.length.toString(),
       sub: modelNames.slice(0, 2).join(", ") + (modelNames.length > 2 ? ` +${modelNames.length - 2}` : ""),
       icon: Bot,
@@ -97,7 +107,7 @@ export function TokenStatsCard({ stats, isLoading }: TokenStatsCardProps) {
           <div className="flex items-center gap-2">
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
             Token Usage
-            <span className="text-xs font-normal text-muted-foreground">24h</span>
+            <span className="text-xs font-normal text-muted-foreground">{windowLabel}</span>
           </div>
           {hasActivity && (
             <Badge variant="secondary" className="text-[10px] font-mono">
@@ -200,6 +210,8 @@ export function TokenStatsCard({ stats, isLoading }: TokenStatsCardProps) {
             <div className="divide-y divide-border/50">
               {modelNames.map((name) => {
                 const m = models[name];
+                const cumTotal = (m.cumulative_generated ?? 0) + (m.cumulative_prompt ?? 0);
+                const windowTotal = m.generated_tokens + m.prompt_tokens;
                 return (
                   <div key={name} className="flex items-center justify-between py-1.5 text-sm">
                     <div className="flex items-center gap-2 min-w-0">
@@ -207,8 +219,11 @@ export function TokenStatsCard({ stats, isLoading }: TokenStatsCardProps) {
                       <span className="font-medium truncate">{name}</span>
                     </div>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
-                      <span className="font-mono">{formatNumber(m.generated_tokens + m.prompt_tokens)} tok</span>
-                      <span className="font-mono">{m.requests} req</span>
+                      <span className="font-mono">{formatNumber(cumTotal)} tok</span>
+                      {windowTotal > 0 && (
+                        <span className="font-mono text-blue-400">+{formatNumber(windowTotal)}</span>
+                      )}
+                      <span className="font-mono">{m.cumulative_requests ?? m.requests} req</span>
                       {m.avg_tokens_per_sec > 0 && (
                         <span className="font-mono text-amber-500">{m.avg_tokens_per_sec} t/s</span>
                       )}
