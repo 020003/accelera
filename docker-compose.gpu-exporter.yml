@@ -18,11 +18,9 @@ services:
       - GPU_COLLECT_INTERVAL=${GPU_COLLECT_INTERVAL:-60}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       # ── AI Runtime Integration ──
-      # Set these to skip auto-discovery and connect directly.
       # Use host.docker.internal to reach services on the Docker host.
-      # Leave blank or remove to auto-discover via port scanning.
-      # - OLLAMA_URL=http://host.docker.internal:11434
-      # - SGLANG_URL=http://host.docker.internal:30000
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - SGLANG_URL=http://host.docker.internal:30000
       # If Ollama Prometheus metrics are on a different service/port
       # (e.g. ollama-metrics sidecar), set this explicitly:
       # - OLLAMA_METRICS_URL=http://host.docker.internal:11434/metrics

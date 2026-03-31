@@ -25,6 +25,7 @@ Endpoints:
 """
 
 import logging
+import os
 import re
 
 import requests as http_requests
@@ -37,20 +38,32 @@ log = logging.getLogger(__name__)
 tokens_bp = Blueprint("tokens", __name__)
 
 
+def _is_in_container() -> bool:
+    """Best-effort check if we're running inside a Docker container."""
+    try:
+        with open("/proc/1/cgroup", "r") as f:
+            return "docker" in f.read() or "containerd" in f.read()
+    except Exception:
+        pass
+    return os.path.isfile("/.dockerenv")
+
+
 def _resolve_ollama_metrics_url() -> str:
     """Determine the Ollama Prometheus metrics URL."""
     if OLLAMA_METRICS_URL:
         return OLLAMA_METRICS_URL.rstrip("/")
     if OLLAMA_URL:
         return f"{OLLAMA_URL.rstrip('/')}/metrics"
-    return "http://localhost:11434/metrics"
+    host = "host.docker.internal" if _is_in_container() else "localhost"
+    return f"http://{host}:11434/metrics"
 
 
 def _resolve_sglang_base_url() -> str:
     """Determine the SGLang base URL."""
     if SGLANG_URL:
         return SGLANG_URL.rstrip("/")
-    return f"http://localhost:{SGLANG_DEFAULT_PORT}"
+    host = "host.docker.internal" if _is_in_container() else "localhost"
+    return f"http://{host}:{SGLANG_DEFAULT_PORT}"
 
 
 _ollama_metrics_url = _resolve_ollama_metrics_url()
