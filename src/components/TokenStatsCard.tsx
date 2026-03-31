@@ -89,10 +89,18 @@ export function TokenStatsCard({ stats, isLoading, hours = 24 }: TokenStatsCardP
   // Prepare chart data — downsample to ~120 points for readability while keeping full range
   const maxPoints = 120;
   const step = history.length > maxPoints ? Math.ceil(history.length / maxPoints) : 1;
+  const fmtTime = (iso: string): string => {
+    const d = new Date(iso);
+    if (hours <= 12) {
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
+
   const chartData = history
     .filter((_, i) => i % step === 0 || i === history.length - 1)
     .map((pt) => ({
-      time: new Date(pt.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      time: fmtTime(pt.time),
       generated: pt.generated,
       prompt: pt.prompt,
       total: pt.total,

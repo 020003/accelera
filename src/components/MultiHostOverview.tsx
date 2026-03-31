@@ -127,13 +127,22 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$" 
   const rawHistory = fleet?.history ?? [];
   const maxPts = 120;
   const step = rawHistory.length > maxPts ? Math.ceil(rawHistory.length / maxPts) : 1;
+
+  const fmtTime = (iso: string): string => {
+    const d = new Date(iso);
+    if (hours <= 12) {
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    if (hours <= 24) {
+      return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    }
+    return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  };
+
   const chartData = rawHistory
     .filter((_, i) => i % step === 0 || i === rawHistory.length - 1)
     .map((pt) => ({
-      time: new Date(pt.time).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      time: fmtTime(pt.time),
       tokens: pt.total,
       generated: pt.generated,
       prompt: pt.prompt,
