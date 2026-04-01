@@ -1,61 +1,27 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNvidiaSmi } from "@/hooks/useNvidiaSmi";
 import { useTopology } from "@/hooks/useTopology";
-import { HostManager } from "@/components/HostManager";
 import { MultiHostOverview } from "@/components/MultiHostOverview";
 import { HostTab } from "@/components/HostTab";
 import { PowerUsageChart } from "@/components/PowerUsageChart";
 import { AlertsManager } from "@/components/AlertsManager";
 import { GpuEventsPanel } from "@/components/GpuEventsPanel";
-import { SystemStatus } from "@/components/SystemStatus";
-import { ConfigPanel } from "@/components/ConfigPanel";
-import { useAuth } from "@/hooks/useAuth";
-import { useCurrency, CURRENCIES } from "@/hooks/useCurrency";
-
-// Lazy load heavy visualization components
-const GPUTopologyMap = lazy(() => import("@/components/GPUTopologyMap").then(m => ({ default: m.GPUTopologyMap })));
-const GPU3DHeatmap = lazy(() => import("@/components/GPU3DHeatmap").then(m => ({ default: m.GPU3DHeatmap })));
+import { DashboardHeader } from "@/components/DashboardHeader";
+import { DashboardFooter } from "@/components/DashboardFooter";
+import { VisualizationsTab } from "@/components/VisualizationsTab";
+import { SettingsTab } from "@/components/SettingsTab";
+import { useCurrency } from "@/hooks/useCurrency";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Button } from "@/components/ui/button";
-import { Monitor, BarChart3, Settings, Cog, TrendingUp, NetworkIcon, Bell, ShieldAlert, Lock, LogOut, Activity, Thermometer, Zap, HardDrive, Cpu, Loader2, RefreshCw, Sun, Moon, Timer, DollarSign, Eye, EyeOff, Info } from "lucide-react";
-import { Switch } from "@/components/ui/switch";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Monitor, BarChart3, Cog, TrendingUp, Bell, ShieldAlert } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
-import type { NvidiaSmiResponse, GpuInfo } from "@/types/gpu";
+import type { NvidiaSmiResponse } from "@/types/gpu";
+import type { Host, HostData } from "@/types/dashboard";
 import { proxyUrl } from "@/lib/proxy";
 import { useTheme } from "@/hooks/useTheme";
 
-interface Host {
-  url: string;
-  name: string;
-  isConnected: boolean;
-}
-
-interface HostData {
-  url: string;
-  name: string;
-  isConnected: boolean;
-  gpus: GpuInfo[];
-  timestamp?: string;
-  error?: string;
-  ollama?: {
-    isAvailable: boolean;
-    models: any[];
-    performanceMetrics: any;
-    recentRequests: any[];
-  };
-  sglang?: {
-    isAvailable: boolean;
-    models: any[];
-    sglangUrl?: string;
-    serverInfo?: any;
-  };
-}
 
 export default function Dashboard() {
   // Load settings from localStorage
@@ -539,55 +505,16 @@ export default function Dashboard() {
         <meta name="description" content="Professional GPU acceleration platform for NVIDIA graphics cards with advanced AI workload management, real-time monitoring, and performance optimization." />
       </Helmet>
 
-      {/* Header */}
-      <header className="navbar">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <img 
-                src="/logo.png" 
-                alt="Accelera" 
-                className="h-9 sm:h-12 w-auto"
-              />
-              <div>
-                <h1 className="text-xl sm:text-2xl font-bold text-foreground">Accelera</h1>
-                <p className="text-sm text-muted-foreground hidden sm:block">
-                  High-Performance GPU Acceleration Platform
-                </p>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-2 sm:gap-4">
-              <div className="hidden lg:flex items-center gap-4 text-sm text-muted-foreground">
-                <span><span className="font-medium">Hosts:</span> {connectedHosts.length}/{hostsData.length}</span>
-                <span><span className="font-medium">GPUs:</span> {totalGpus}</span>
-                {totalAiModels > 0 && (
-                  <span><span className="font-medium">AI Models:</span> {totalAiModels}</span>
-                )}
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={toggleTheme}
-                title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-              >
-                {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              </Button>
-              <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm ${
-                (connectedHosts.length > 0 || hostsWithOllama > 0 || hostsWithSglang > 0)
-                  ? "bg-accelera-green/10 text-accelera-green" 
-                  : "bg-red-500/10 text-red-500"
-              }`}>
-                <div className={`w-2 h-2 rounded-full ${
-                  (connectedHosts.length > 0 || hostsWithOllama > 0 || hostsWithSglang > 0) ? "bg-accelera-green animate-pulse-slow" : "bg-red-500"
-                }`} />
-                {(connectedHosts.length > 0 || hostsWithOllama > 0 || hostsWithSglang > 0) ? "Online" : "Offline"}
-              </div>
-            </div>
-          </div>
-        </div>
-      </header>
+      <DashboardHeader
+        theme={theme}
+        toggleTheme={toggleTheme}
+        connectedHosts={connectedHosts}
+        hostsData={hostsData}
+        totalGpus={totalGpus}
+        totalAiModels={totalAiModels}
+        hostsWithOllama={hostsWithOllama}
+        hostsWithSglang={hostsWithSglang}
+      />
 
       <main className="container mx-auto px-4 py-6 space-y-6">
 
@@ -667,102 +594,17 @@ export default function Dashboard() {
 
           {/* Advanced Visualizations Tab */}
           <TabsContent value="visualizations" className="space-y-4">
-            <Tabs defaultValue="topology" className="space-y-4">
-              {/* Tab header row */}
-              <div className="flex items-center justify-between">
-                <TabsList>
-                  <TabsTrigger value="topology" className="gap-1.5 text-xs">
-                    <NetworkIcon className="h-3.5 w-3.5" />
-                    GPU Topology
-                  </TabsTrigger>
-                  <TabsTrigger value="heatmap" className="gap-1.5 text-xs">
-                    <BarChart3 className="h-3.5 w-3.5" />
-                    Cluster Heatmap
-                  </TabsTrigger>
-                </TabsList>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 gap-1.5 text-xs"
-                  disabled={vizRefreshing}
-                  onClick={async () => {
-                    setVizRefreshing(true);
-                    setAdvancedDataLoaded(false);
-                    await fetchAdvancedVisualizationData();
-                    setVizRefreshing(false);
-                  }}
-                >
-                  <RefreshCw className={`h-3 w-3 ${vizRefreshing ? "animate-spin" : ""}`} />
-                  Refresh
-                </Button>
-              </div>
-
-              {/* ── Topology ── */}
-              <TabsContent value="topology" className="space-y-3">
-                <div className="flex items-center gap-3 flex-wrap">
-                  {[
-                    { label: "NVLink", color: "bg-green-500", desc: "High speed" },
-                    { label: "SXM", color: "bg-amber-500", desc: "Ultra high speed" },
-                    { label: "PCIe", color: "bg-indigo-500", desc: "Standard" },
-                  ].map((l) => (
-                    <div key={l.label} className="flex items-center gap-1.5 text-xs">
-                      <div className={`w-2.5 h-2.5 rounded-full ${l.color}`} />
-                      <span className="font-medium">{l.label}</span>
-                      <span className="text-muted-foreground">{l.desc}</span>
-                    </div>
-                  ))}
-                </div>
-                <Suspense fallback={<VizLoading text="Loading topology..." />}>
-                  <GPUTopologyMap data={topologyData} />
-                </Suspense>
-              </TabsContent>
-
-              {/* ── Heatmap ── */}
-              <TabsContent value="heatmap" className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 flex-wrap text-xs">
-                    {[
-                      { icon: Activity, label: "Utilization", color: "text-blue-500" },
-                      { icon: Thermometer, label: "Temperature", color: "text-red-500" },
-                      { icon: Zap, label: "Power", color: "text-amber-500" },
-                      { icon: HardDrive, label: "Memory", color: "text-purple-500" },
-                    ].map((m) => {
-                      const Icon = m.icon;
-                      return (
-                        <div key={m.label} className="flex items-center gap-1">
-                          <Icon className={`h-3.5 w-3.5 ${m.color}`} />
-                          <span className="text-muted-foreground">{m.label}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <ToggleGroup
-                    type="single"
-                    value={String(heatmapHours)}
-                    onValueChange={(v) => {
-                      if (!v) return;
-                      setHeatmapHours(Number(v));
-                      setAdvancedDataLoaded(false);
-                    }}
-                    className="h-7"
-                  >
-                    {[2, 6, 12, 24].map((h) => (
-                      <ToggleGroupItem key={h} value={String(h)} className="text-xs px-2.5 h-7">
-                        {h}h
-                      </ToggleGroupItem>
-                    ))}
-                  </ToggleGroup>
-                </div>
-                <Suspense fallback={<VizLoading text="Loading heatmap..." />}>
-                  {heatmapData ? (
-                    <GPU3DHeatmap data={heatmapData} />
-                  ) : (
-                    <VizEmpty text="No heatmap data available. Data appears once hosts report historical metrics." />
-                  )}
-                </Suspense>
-              </TabsContent>
-
-            </Tabs>
+            <VisualizationsTab
+              topologyData={topologyData}
+              heatmapData={heatmapData}
+              heatmapHours={heatmapHours}
+              setHeatmapHours={setHeatmapHours}
+              advancedDataLoaded={advancedDataLoaded}
+              setAdvancedDataLoaded={setAdvancedDataLoaded}
+              fetchAdvancedVisualizationData={fetchAdvancedVisualizationData}
+              vizRefreshing={vizRefreshing}
+              setVizRefreshing={setVizRefreshing}
+            />
           </TabsContent>
 
           {/* Individual Host Tabs */}
@@ -805,315 +647,30 @@ export default function Dashboard() {
           </TabsContent>
 
           {/* Settings Tab */}
-          <TabsContent value="settings" className="space-y-8">
-
-            {/* ── Section: Polling & Refresh ── */}
-            <section className="space-y-4">
-              <div>
-                <h3 className="text-base font-semibold flex items-center gap-2">
-                  <Timer className="h-4 w-4 text-blue-500" />
-                  Polling & Refresh
-                </h3>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  Controls how often the dashboard fetches new data from GPU hosts.
-                </p>
-              </div>
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="grid gap-6 md:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label className="text-sm font-medium">Auto-Refresh Interval</Label>
-                      <Select value={refreshInterval.toString()} onValueChange={handleRefreshInterval}>
-                        <SelectTrigger className="h-9">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="0">Manual only</SelectItem>
-                          <SelectItem value="2000">Every 2 seconds</SelectItem>
-                          <SelectItem value="3000">Every 3 seconds</SelectItem>
-                          <SelectItem value="5000">Every 5 seconds (default)</SelectItem>
-                          <SelectItem value="10000">Every 10 seconds</SelectItem>
-                          <SelectItem value="30000">Every 30 seconds</SelectItem>
-                          <SelectItem value="60000">Every 60 seconds</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">
-                        {refreshInterval === 0
-                          ? "Auto-refresh is paused. Use the Refresh button on each host tab."
-                          : `GPU metrics, power data, and AI runtime status update every ${refreshInterval / 1000}s.`}
-                      </p>
-                    </div>
-                    <div className="flex items-center justify-between rounded-lg border p-3">
-                      <div className="space-y-0.5">
-                        <Label className="text-sm font-medium">Demo Mode</Label>
-                        <p className="text-xs text-muted-foreground">
-                          Show sample GPU data without connecting to real hosts.
-                        </p>
-                      </div>
-                      <Switch checked={demo} onCheckedChange={handleDemoToggle} />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </section>
-
-            {/* ── Section: Display & Costs ── */}
-            <section className="space-y-4">
-              <div>
-                <h3 className="text-base font-semibold flex items-center gap-2">
-                  <DollarSign className="h-4 w-4 text-emerald-500" />
-                  Display & Costs
-                </h3>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  Currency and energy rate used for power cost estimates across the dashboard.
-                </p>
-              </div>
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="grid gap-6 md:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label className="text-sm font-medium">Currency</Label>
-                      <Select value={currency.code} onValueChange={setCurrency}>
-                        <SelectTrigger className="h-9">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {CURRENCIES.map((c) => (
-                            <SelectItem key={c.code} value={c.code}>
-                              {c.symbol} — {c.name} ({c.code})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">
-                        Affects all cost and energy rate displays.
-                      </p>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-sm font-medium">Energy Rate ({currency.symbol}/kWh)</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="0.12"
-                        value={energyRate || ""}
-                        onChange={(e) => handleEnergyRate(e.target.value)}
-                        className="h-9"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Your electricity cost per kilowatt-hour. Used to estimate GPU running costs.
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </section>
-
-            {/* ── Section: Security ── */}
-            <section className="space-y-4">
-              <div>
-                <h3 className="text-base font-semibold flex items-center gap-2">
-                  <Lock className="h-4 w-4 text-amber-500" />
-                  Security
-                </h3>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  Protect this dashboard with a password. Stored locally in your browser.
-                </p>
-              </div>
-              <DashboardAccessCard />
-            </section>
-
-            {/* ── Section: GPU Hosts ── */}
-            {!demo && (
-              <section className="space-y-4">
-                <div>
-                  <h3 className="text-base font-semibold flex items-center gap-2">
-                    <Cpu className="h-4 w-4 text-purple-500" />
-                    GPU Hosts
-                  </h3>
-                  <p className="text-sm text-muted-foreground mt-0.5">
-                    Manage the GPU exporter endpoints this dashboard connects to.
-                  </p>
-                </div>
-                <HostManager 
-                  hosts={hosts} 
-                  setHosts={(newHosts) => {
-                    setHosts(newHosts);
-                    if (newHosts.length > hosts.length) {
-                      fetchAllHostsData();
-                    }
-                  }}
-                  onHostStatusChange={() => {}}
-                  hostsAiInfo={Object.fromEntries(
-                    hostsData.map(h => [h.url, { ollama: h.ollama, sglang: h.sglang }])
-                  )}
-                />
-              </section>
-            )}
-
-            {/* ── Section: Exporter Configuration ── */}
-            {!demo && hosts.length > 0 && (
-              <section className="space-y-4">
-                <ConfigPanel hosts={hosts} />
-              </section>
-            )}
-
-            {/* ── Section: System Status ── */}
-            {!demo && hosts.length > 0 && (
-              <section className="space-y-4">
-                <SystemStatus hosts={hosts} />
-              </section>
-            )}
+          <TabsContent value="settings">
+            <SettingsTab
+              refreshInterval={refreshInterval}
+              handleRefreshInterval={handleRefreshInterval}
+              energyRate={energyRate}
+              handleEnergyRate={handleEnergyRate}
+              demo={demo}
+              handleDemoToggle={handleDemoToggle}
+              currency={currency}
+              setCurrency={setCurrency}
+              hosts={hosts}
+              setHosts={setHosts}
+              hostsData={hostsData}
+              fetchAllHostsData={fetchAllHostsData}
+            />
           </TabsContent>
         </Tabs>
       </main>
 
-      {/* Footer */}
-      <footer className="border-t bg-card/50">
-        <div className="container mx-auto px-4 py-3 sm:py-4">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-1 text-xs sm:text-sm text-muted-foreground">
-            <div>Accelera v2.1.0 — GPU Monitoring Platform</div>
-            <div className="hidden sm:flex items-center gap-4">
-              {totalGpus > 0 && (
-                <span>
-                  {totalGpus} GPU{totalGpus !== 1 ? 's' : ''} across {connectedHosts.length} host{connectedHosts.length !== 1 ? 's' : ''}
-                </span>
-              )}
-              {totalAiModels > 0 && (
-                <span>
-                  {totalAiModels} AI model{totalAiModels !== 1 ? 's' : ''}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      </footer>
+      <DashboardFooter
+        totalGpus={totalGpus}
+        connectedHosts={connectedHosts}
+        totalAiModels={totalAiModels}
+      />
     </div>
-  );
-}
-
-function DashboardAccessCard() {
-  const { authEnabled, logout, setPassword, clearPassword } = useAuth();
-  const [newPass, setNewPass] = useState("");
-  const [confirmPass, setConfirmPass] = useState("");
-  const [showPass, setShowPass] = useState(false);
-
-  const handleSetPassword = async () => {
-    if (!newPass || newPass !== confirmPass) {
-      toast.error("Passwords do not match");
-      return;
-    }
-    await setPassword(newPass);
-    setNewPass("");
-    setConfirmPass("");
-    setShowPass(false);
-    toast.success(authEnabled ? "Password updated" : "Dashboard password set");
-  };
-
-  const handleRemovePassword = () => {
-    clearPassword();
-    toast.success("Password removed — dashboard is now open");
-  };
-
-  return (
-    <Card>
-      <CardContent className="pt-6 space-y-4">
-        {/* Status row */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm">
-            {authEnabled ? (
-              <>
-                <div className="h-2 w-2 rounded-full bg-green-500" />
-                <span className="font-medium">Password protection is active</span>
-              </>
-            ) : (
-              <>
-                <div className="h-2 w-2 rounded-full bg-yellow-500" />
-                <span className="font-medium text-muted-foreground">No password set — dashboard is open to anyone with the URL</span>
-              </>
-            )}
-          </div>
-          {authEnabled && (
-            <Button variant="outline" size="sm" onClick={logout} className="gap-1.5 h-7 text-xs">
-              <LogOut className="h-3 w-3" />
-              Sign Out
-            </Button>
-          )}
-        </div>
-
-        {/* Password form */}
-        <div className="grid gap-3 md:grid-cols-2 items-end">
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">
-              {authEnabled ? "New Password" : "Password"}
-            </Label>
-            <div className="relative">
-              <Input
-                type={showPass ? "text" : "password"}
-                value={newPass}
-                onChange={(e) => setNewPass(e.target.value)}
-                placeholder={authEnabled ? "Enter new password" : "Choose a password"}
-                className="h-9 pr-9"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPass(!showPass)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-sm font-medium">Confirm Password</Label>
-            <Input
-              type={showPass ? "text" : "password"}
-              value={confirmPass}
-              onChange={(e) => setConfirmPass(e.target.value)}
-              placeholder="Confirm password"
-              className="h-9"
-            />
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            onClick={handleSetPassword}
-            disabled={!newPass || !confirmPass}
-          >
-            {authEnabled ? "Update Password" : "Set Password"}
-          </Button>
-          {authEnabled && (
-            <Button variant="ghost" size="sm" onClick={handleRemovePassword} className="text-destructive hover:text-destructive">
-              Remove Password
-            </Button>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function VizLoading({ text }: { text: string }) {
-  return (
-    <Card>
-      <CardContent className="flex items-center justify-center py-20">
-        <div className="flex items-center gap-3 text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" />
-          <span className="text-sm">{text}</span>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function VizEmpty({ text }: { text: string }) {
-  return (
-    <Card>
-      <CardContent className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-        <BarChart3 className="h-8 w-8 mb-3 opacity-30" />
-        <p className="text-sm">{text}</p>
-      </CardContent>
-    </Card>
   );
 }

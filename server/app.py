@@ -41,6 +41,10 @@ if CORS_ORIGINS == "*":
 else:
     CORS(app, origins=CORS_ORIGINS.split(","))
 
+# Middleware: rate limiting & global error handlers
+from middleware import register_middleware
+register_middleware(app)
+
 # Inject version header on every response
 @app.after_request
 def _add_version_header(response):
