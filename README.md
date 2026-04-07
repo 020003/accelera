@@ -37,12 +37,12 @@ Real-time monitoring, AI workload management, and cluster analytics for NVIDIA G
 ### GPU Process Inspector
 - **Deep process analysis** — PID, resolved name, command line, user, VRAM, uptime, CPU%
 - **AI runtime detection** — automatically identifies Ollama, SGLang, vLLM, Triton, PyTorch processes
-- **Model name resolution** — queries Ollama `/api/ps` and SGLang `/v1/models` to match running models
+- **Model name resolution** — queries Ollama `/api/ps`, SGLang `/v1/models`, and vLLM `/v1/models` to match running models
 - **Auto-refresh** — 10-second polling for near-real-time process monitoring
 - **Enriched GPU cards** — process list on GPU cards shows resolved names, runtime badges, and model info
 
 ### AI Model Benchmark Runner
-- **One-click benchmarks** — test Ollama and SGLang model throughput with preset prompts
+- **One-click benchmarks** — test Ollama, SGLang, and vLLM model throughput with preset prompts
 - **Key metrics** — tokens/sec, time-to-first-token, generated tokens, total duration
 - **Benchmark history** — results persisted in SQLite, viewable in a collapsible table
 
@@ -101,7 +101,7 @@ The **frontend** connects directly to each GPU exporter. There is no central bac
 
 ## Quick Start
 
-### Docker (recommended)
+### Docker Compose (recommended)
 
 ```bash
 git clone https://github.com/020003/accelera.git
@@ -115,6 +115,48 @@ docker compose -f docker-compose.gpu-exporter.yml up -d
 ```
 
 Open `http://<frontend-host>:8080` and add your GPU hosts in the Settings tab.
+
+### Helm Chart (Kubernetes / OpenShift)
+
+A production-ready Helm chart is provided in [`helm/accelera/`](helm/accelera/).
+
+```bash
+# 1. Build and push images to your registry
+docker build -t <REGISTRY>/accelera-frontend:latest -f Dockerfile .
+docker push <REGISTRY>/accelera-frontend:latest
+
+docker build -t <REGISTRY>/accelera-gpu-exporter:latest -f server/Dockerfile server/
+docker push <REGISTRY>/accelera-gpu-exporter:latest
+
+# 2. Label GPU nodes (if not already done by the NVIDIA GPU Operator)
+kubectl label node <GPU_NODE> nvidia.com/gpu.present=true
+
+# 3a. Install on Kubernetes
+helm install accelera ./helm/accelera \
+  --namespace accelera --create-namespace \
+  --set frontend.image.repository=<REGISTRY>/accelera-frontend \
+  --set gpuExporter.image.repository=<REGISTRY>/accelera-gpu-exporter \
+  --set frontend.ingress.enabled=true \
+  --set frontend.ingress.hosts[0].host=accelera.example.com \
+  --set frontend.ingress.hosts[0].paths[0].path=/ \
+  --set frontend.ingress.hosts[0].paths[0].pathType=Prefix
+
+# 3b. Or install on OpenShift
+helm install accelera ./helm/accelera \
+  --namespace accelera --create-namespace \
+  --set frontend.image.repository=<REGISTRY>/accelera-frontend \
+  --set gpuExporter.image.repository=<REGISTRY>/accelera-gpu-exporter \
+  --set openshift.enabled=true \
+  --set openshift.route.enabled=true \
+  --set openshift.route.host=accelera.apps.mycluster.example.com
+```
+
+The chart deploys:
+- **Frontend** — Deployment + Service + Ingress (K8s) or Route (OpenShift)
+- **GPU Exporter** — DaemonSet on every GPU node (`hostNetwork`, `hostPID`, `privileged`)
+- **OpenShift SCC** — custom SecurityContextConstraints for privileged GPU access
+
+See [`helm/accelera/README.md`](helm/accelera/README.md) for all values and configuration options.
 
 ### Development
 
@@ -147,6 +189,7 @@ All settings are via environment variables (`.env` file supported):
 | `OLLAMA_URL` | *(auto-discover)* | Ollama API URL (e.g. `http://host.docker.internal:11434`) |
 | `OLLAMA_METRICS_URL` | `OLLAMA_URL/metrics` | Ollama Prometheus metrics endpoint (if separate sidecar) |
 | `SGLANG_URL` | *(auto-discover)* | SGLang Runtime URL (e.g. `http://host.docker.internal:30000`) |
+| `VLLM_URL` | *(auto-discover)* | vLLM URL (e.g. `http://host.docker.internal:8000`) |
 
 See [`.env.example`](.env.example) for the full list.
 
@@ -167,13 +210,14 @@ See [`.env.example`](.env.example) for the full list.
 | `GET` | `/api/tokens/stats?hours=24` | Token usage statistics |
 | `POST` | `/api/ollama/discover` | Discover Ollama on a host |
 | `POST` | `/api/sglang/discover` | Discover SGLang Runtime on a host |
+| `POST` | `/api/vllm/discover` | Discover vLLM on a host |
 | `GET` | `/api/gpu/events` | GPU health events (NVML + Xid) |
 | `GET/POST` | `/api/alerts/rules` | Alert rule CRUD |
 | `GET` | `/api/alerts/events` | Alert event history |
 | `GET/PUT` | `/api/settings` | Runtime configuration |
 | `GET` | `/api/gpu/processes` | Enriched GPU process list (PID, name, user, uptime, CPU%, model) |
 | `GET` | `/api/benchmarks/presets` | Benchmark prompt presets |
-| `POST` | `/api/benchmarks/run` | Run a benchmark against Ollama or SGLang |
+| `POST` | `/api/benchmarks/run` | Run a benchmark against Ollama, SGLang, or vLLM |
 | `GET` | `/api/benchmarks/results` | Benchmark result history |
 | `GET/PUT` | `/api/alerts/webhook` | Webhook configuration |
 | `POST` | `/api/alerts/webhook/test` | Send test webhook notification |
@@ -186,7 +230,7 @@ See [`.env.example`](.env.example) for the full list.
 
 **Backend**: Flask 3.0, Python 3.10+, nvidia-ml-py3, SQLite (WAL mode), flask-cors
 
-**Deployment**: Docker Compose (frontend, GPU exporter)
+**Deployment**: Docker Compose, Helm Chart (Kubernetes / OpenShift)
 
 ---
 
@@ -202,12 +246,12 @@ The frontend fetches metrics from each exporter independently and aggregates the
 
 | Environment | AI Runtime URLs | Notes |
 |---|---|---|
-| **Docker (default)** | `http://host.docker.internal:<port>` | `extra_hosts` mapping added automatically |
+| **Docker Compose** | `http://host.docker.internal:<port>` | `extra_hosts` mapping added automatically |
+| **Helm (K8s/OpenShift)** | `http://localhost:<port>` | DaemonSet with `hostNetwork`; see `helm/accelera/` |
 | **Bare-metal** | `http://localhost:<port>` | Run `pip install -r server/requirements.txt && python server/app.py` |
-| **Kubernetes** | `http://<service-name>.<namespace>:<port>` | Use ConfigMap/Secret for env vars |
-| **No-GPU host** | N/A | Exporter still serves Ollama/SGLang token stats with empty GPU list |
+| **No-GPU host** | N/A | Exporter still serves Ollama/SGLang/vLLM token stats with empty GPU list |
 
-Copy `.env.example` to `.env` on each host and configure as needed. The exporter auto-discovers Ollama and SGLang on common ports if URLs are not set explicitly.
+Copy `.env.example` to `.env` on each host and configure as needed. The exporter auto-discovers Ollama, SGLang, and vLLM on common ports if URLs are not set explicitly.
 
 ---
 

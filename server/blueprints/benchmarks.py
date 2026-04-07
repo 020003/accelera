@@ -14,6 +14,7 @@ from flask import Blueprint, jsonify, request
 import storage
 from blueprints.ollama import check_ollama_availability
 from blueprints.sglang import check_sglang_availability
+from blueprints.vllm import check_vllm_availability
 
 log = logging.getLogger(__name__)
 benchmarks_bp = Blueprint("benchmarks", __name__)
@@ -142,13 +143,16 @@ def _benchmark_ollama(ollama_url: str, model: str, prompt: str, max_tokens: int)
         }
 
 
-def _benchmark_sglang(sglang_url: str, model: str, prompt: str, max_tokens: int) -> dict:
-    """Run a single benchmark against an SGLang /v1/completions endpoint."""
+def _benchmark_openai_compat(base_url: str, model: str, prompt: str, max_tokens: int, runtime: str) -> dict:
+    """Run a single benchmark against an OpenAI-compatible /v1/completions endpoint.
+
+    Works for both SGLang and vLLM.
+    """
     t0 = time.perf_counter()
 
     try:
         resp = http_requests.post(
-            f"{sglang_url}/v1/completions",
+            f"{base_url}/v1/completions",
             json={
                 "model": model,
                 "prompt": prompt,
@@ -173,12 +177,12 @@ def _benchmark_sglang(sglang_url: str, model: str, prompt: str, max_tokens: int)
 
         return {
             "model": model,
-            "runtime": "sglang",
+            "runtime": runtime,
             "prompt": prompt[:200],
             "prompt_tokens": prompt_tokens,
             "generated_tokens": gen_tokens,
             "tokens_per_second": round(tps, 2),
-            "time_to_first_token_ms": None,  # SGLang non-stream doesn't report TTFT
+            "time_to_first_token_ms": None,
             "total_duration_ms": round(total_ms, 1),
             "status": "completed",
             "metadata": {"max_tokens": max_tokens, "response_preview": response_text[:300]},
@@ -188,7 +192,7 @@ def _benchmark_sglang(sglang_url: str, model: str, prompt: str, max_tokens: int)
         total_ms = (time.perf_counter() - t0) * 1000
         return {
             "model": model,
-            "runtime": "sglang",
+            "runtime": runtime,
             "prompt": prompt[:200],
             "prompt_tokens": 0,
             "generated_tokens": 0,
@@ -232,8 +236,8 @@ def run_benchmark():
 
     if not model:
         return jsonify({"error": "Missing 'model' field"}), 400
-    if runtime not in ("ollama", "sglang"):
-        return jsonify({"error": "runtime must be 'ollama' or 'sglang'"}), 400
+    if runtime not in ("ollama", "sglang", "vllm"):
+        return jsonify({"error": "runtime must be 'ollama', 'sglang', or 'vllm'"}), 400
 
     preset = PRESETS.get(preset_key, PRESETS["short"])
     prompt = body.get("prompt", preset["prompt"])
@@ -248,14 +252,22 @@ def run_benchmark():
 
         log.info("Running Ollama benchmark: model=%s, preset=%s", model, preset_key)
         result = _benchmark_ollama(ollama_url, model, prompt, max_tokens)
-    else:
+    elif runtime == "sglang":
         sglang_info = check_sglang_availability("http://localhost:5000")
         sglang_url = sglang_info.get("sglangUrl")
         if not sglang_url:
             return jsonify({"error": "SGLang is not available on this host"}), 503
 
         log.info("Running SGLang benchmark: model=%s, preset=%s", model, preset_key)
-        result = _benchmark_sglang(sglang_url, model, prompt, max_tokens)
+        result = _benchmark_openai_compat(sglang_url, model, prompt, max_tokens, "sglang")
+    else:
+        vllm_info = check_vllm_availability("http://localhost:5000")
+        vllm_url = vllm_info.get("vllmUrl")
+        if not vllm_url:
+            return jsonify({"error": "vLLM is not available on this host"}), 503
+
+        log.info("Running vLLM benchmark: model=%s, preset=%s", model, preset_key)
+        result = _benchmark_openai_compat(vllm_url, model, prompt, max_tokens, "vllm")
 
     # Persist
     result_id = storage.save_benchmark_result(result)

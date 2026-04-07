@@ -32,7 +32,8 @@ import requests as http_requests
 from flask import Blueprint, jsonify, request
 
 import storage
-from config import OLLAMA_URL, OLLAMA_METRICS_URL, SGLANG_URL, SGLANG_DEFAULT_PORT
+from config import (OLLAMA_URL, OLLAMA_METRICS_URL, SGLANG_URL, SGLANG_DEFAULT_PORT,
+                    VLLM_URL, VLLM_DEFAULT_PORT)
 
 log = logging.getLogger(__name__)
 tokens_bp = Blueprint("tokens", __name__)
@@ -66,8 +67,17 @@ def _resolve_sglang_base_url() -> str:
     return f"http://{host}:{SGLANG_DEFAULT_PORT}"
 
 
+def _resolve_vllm_base_url() -> str:
+    """Determine the vLLM base URL."""
+    if VLLM_URL:
+        return VLLM_URL.rstrip("/")
+    host = "host.docker.internal" if _is_in_container() else "localhost"
+    return f"http://{host}:{VLLM_DEFAULT_PORT}"
+
+
 _ollama_metrics_url = _resolve_ollama_metrics_url()
 _sglang_base_url = _resolve_sglang_base_url()
+_vllm_base_url = _resolve_vllm_base_url()
 
 # ---------------------------------------------------------------------------
 # Ollama metrics
@@ -344,10 +354,128 @@ def _collect_sglang():
 # Combined collector (called from background loop)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# vLLM metrics
+# ---------------------------------------------------------------------------
+
+_RE_VLLM_GEN = re.compile(
+    r'^vllm:generation_tokens_total(?:\{[^}]*\})?\s+([\d.]+)', re.M
+)
+_RE_VLLM_PROMPT = re.compile(
+    r'^vllm:prompt_tokens_total(?:\{[^}]*\})?\s+([\d.]+)', re.M
+)
+_RE_VLLM_REQUESTS = re.compile(
+    r'^vllm:(?:num_requests_total|request_success_total)(?:\{[^}]*\})?\s+([\d.]+)', re.M
+)
+_RE_VLLM_E2E_SUM = re.compile(
+    r'^vllm:e2e_request_latency_seconds_sum(?:\{[^}]*\})?\s+([\d.]+)', re.M
+)
+_RE_VLLM_TTFT_SUM = re.compile(
+    r'^vllm:time_to_first_token_seconds_sum(?:\{[^}]*\})?\s+([\d.]+)', re.M
+)
+_RE_VLLM_TTFT_COUNT = re.compile(
+    r'^vllm:time_to_first_token_seconds_count(?:\{[^}]*\})?\s+([\d.]+)', re.M
+)
+# Fallback patterns (older vLLM versions use underscores instead of colons)
+_RE_VLLM_GEN_ALT = re.compile(
+    r'^vllm_generation_tokens_total(?:\{[^}]*\})?\s+([\d.]+)', re.M
+)
+_RE_VLLM_PROMPT_ALT = re.compile(
+    r'^vllm_prompt_tokens_total(?:\{[^}]*\})?\s+([\d.]+)', re.M
+)
+_RE_VLLM_REQUESTS_ALT = re.compile(
+    r'^vllm_(?:num_requests_total|request_success_total)(?:\{[^}]*\})?\s+([\d.]+)', re.M
+)
+
+
+def _get_vllm_model_name() -> str:
+    """Best-effort fetch of the model name from vLLM /v1/models."""
+    try:
+        resp = http_requests.get(f"{_vllm_base_url}/v1/models", timeout=2)
+        if resp.status_code == 200:
+            data = resp.json()
+            models = data.get("data", [])
+            if models:
+                return models[0].get("id", "vllm-model")
+    except Exception:
+        log.debug("Failed to fetch vLLM model name", exc_info=True)
+    return "vllm-model"
+
+
+def _parse_vllm_metrics(text: str) -> dict | None:
+    """Parse vLLM Prometheus metrics into a single model dict."""
+    gen = 0
+    prompt = 0
+    req_count = 0
+    dur_sum = 0.0
+    tpt_sum = 0.0
+    tpt_count = 0
+
+    for m in _RE_VLLM_GEN.finditer(text):
+        gen += int(float(m.group(1)))
+    if gen == 0:
+        for m in _RE_VLLM_GEN_ALT.finditer(text):
+            gen += int(float(m.group(1)))
+
+    for m in _RE_VLLM_PROMPT.finditer(text):
+        prompt += int(float(m.group(1)))
+    if prompt == 0:
+        for m in _RE_VLLM_PROMPT_ALT.finditer(text):
+            prompt += int(float(m.group(1)))
+
+    if gen == 0 and prompt == 0:
+        return None
+
+    for m in _RE_VLLM_REQUESTS.finditer(text):
+        req_count += int(float(m.group(1)))
+    if req_count == 0:
+        for m in _RE_VLLM_REQUESTS_ALT.finditer(text):
+            req_count += int(float(m.group(1)))
+
+    for m in _RE_VLLM_E2E_SUM.finditer(text):
+        dur_sum += float(m.group(1))
+
+    for m in _RE_VLLM_TTFT_SUM.finditer(text):
+        tpt_sum += float(m.group(1))
+    for m in _RE_VLLM_TTFT_COUNT.finditer(text):
+        tpt_count += int(float(m.group(1)))
+
+    return {
+        "generated_tokens": gen,
+        "prompt_tokens": prompt,
+        "request_count": req_count,
+        "request_duration_sum": dur_sum,
+        "tpt_sum": tpt_sum,
+        "tpt_count": tpt_count,
+    }
+
+
+def _collect_vllm():
+    """Scrape vLLM /metrics and record a snapshot."""
+    try:
+        resp = http_requests.get(f"{_vllm_base_url}/metrics", timeout=3)
+        if resp.status_code == 200:
+            data = _parse_vllm_metrics(resp.text)
+            if data is not None:
+                model_name = f"[vllm] {_get_vllm_model_name()}"
+                storage.record_token_snapshot(
+                    model=model_name,
+                    prompt_tokens=data["prompt_tokens"],
+                    generated_tokens=data["generated_tokens"],
+                    request_count=data["request_count"],
+                    tpt_sum=data["tpt_sum"],
+                    tpt_count=data["tpt_count"],
+                    req_dur_sum=data["request_duration_sum"],
+                )
+    except Exception:
+        log.debug("vLLM /metrics collection failed", exc_info=True)
+
+
 def collect_token_metrics():
-    """Scrape Ollama and SGLang metrics and record snapshots."""
+    """Scrape Ollama, SGLang, and vLLM metrics and record snapshots."""
     _collect_ollama()
     _collect_sglang()
+    _collect_vllm()
 
 
 @tokens_bp.route("/api/tokens/stats", methods=["GET"])

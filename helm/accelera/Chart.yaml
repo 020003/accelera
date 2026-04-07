@@ -1,0 +1,21 @@
+apiVersion: v2
+name: accelera
+description: >-
+  High-Performance GPU Acceleration Platform — multi-host GPU monitoring,
+  AI runtime discovery (Ollama, SGLang, vLLM), model benchmarks, and
+  real-time token metrics.
+type: application
+version: 1.0.0
+appVersion: "2.1.0"
+home: https://github.com/your-org/accelera
+keywords:
+  - gpu
+  - monitoring
+  - nvidia
+  - ollama
+  - vllm
+  - sglang
+  - ai
+  - inference
+maintainers:
+  - name: Accelera Team

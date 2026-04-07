@@ -1,0 +1,142 @@
+# ─────────────────────────────────────────────────
+# Accelera Helm Chart — default values
+# ─────────────────────────────────────────────────
+
+# -- Global image settings
+global:
+  # -- Container image pull secrets (list of secret names)
+  imagePullSecrets: []
+
+# ─── Frontend ────────────────────────────────────
+frontend:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: accelera-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
+
+  # -- Kubernetes Ingress (ignored when openshift.route.enabled=true)
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+      # kubernetes.io/ingress.class: nginx
+      # cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - host: accelera.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+    #  - secretName: accelera-tls
+    #    hosts:
+    #      - accelera.example.com
+
+  # -- Extra pod annotations (e.g. Prometheus scrape)
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ─── GPU Exporter (DaemonSet) ────────────────────
+gpuExporter:
+  enabled: true
+
+  image:
+    repository: accelera-gpu-exporter
+    tag: latest
+    pullPolicy: IfNotPresent
+
+  service:
+    # Headless service for DNS discovery
+    type: ClusterIP
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+  # -- hostNetwork lets the exporter bind to the node IP and
+  #    reach local AI runtimes (Ollama, SGLang, vLLM) on localhost.
+  hostNetwork: true
+
+  # -- hostPID allows nvidia-smi/NVML to inspect host GPU processes.
+  hostPID: true
+
+  # -- Privileged mode required for NVML access.
+  privileged: true
+
+  # -- Node selector — schedule only on GPU nodes.
+  #    Standard NVIDIA device-plugin label; adjust if your cluster
+  #    uses a different label.
+  nodeSelector:
+    nvidia.com/gpu.present: "true"
+
+  # -- Tolerations for GPU-tainted nodes
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+
+  # -- Extra pod annotations
+  podAnnotations: {}
+  affinity: {}
+
+  # -- Persistent data (benchmark results, alert config)
+  persistence:
+    enabled: false
+    # storageClassName: ""
+    size: 1Gi
+    accessModes:
+      - ReadWriteOnce
+
+# ─── Configuration ───────────────────────────────
+config:
+  # GPU exporter
+  flaskEnv: production
+  corsOrigins: "*"
+  gpuCollectInterval: "60"
+  logLevel: INFO
+  prometheusEnabled: "true"
+
+  # AI runtime URLs — with hostNetwork these resolve on the node.
+  # Set to "" to rely on auto-discovery instead.
+  ollamaUrl: "http://localhost:11434"
+  sglangUrl: "http://localhost:30000"
+  vllmUrl: "http://localhost:8000"
+
+  # Nginx proxy read timeout (seconds) — increase for long benchmarks
+  proxyReadTimeout: "120s"
+
+# ─── OpenShift ───────────────────────────────────
+openshift:
+  # -- Enable OpenShift-specific resources (Route, SCC)
+  enabled: false
+
+  route:
+    enabled: false
+    host: ""                  # e.g. accelera.apps.mycluster.example.com
+    tls:
+      termination: edge       # edge | passthrough | reencrypt
+      insecureEdgeTerminationPolicy: Redirect
+
+  # -- SecurityContextConstraints for the privileged GPU exporter
+  scc:
+    enabled: true

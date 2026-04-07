@@ -58,11 +58,15 @@ interface BenchmarkRunnerProps {
     isAvailable: boolean;
     models: any[];
   };
+  vllm?: {
+    isAvailable: boolean;
+    models: any[];
+  };
 }
 
 interface HostBenchmarkCache {
   selectedModel: string;
-  selectedRuntime: "ollama" | "sglang";
+  selectedRuntime: "ollama" | "sglang" | "vllm";
   selectedPreset: string;
   running: boolean;
   latestResult: BenchmarkResult | null;
@@ -86,12 +90,12 @@ function formatDate(epoch: number): string {
   });
 }
 
-export function BenchmarkRunner({ hostUrl, ollama, sglang }: BenchmarkRunnerProps) {
+export function BenchmarkRunner({ hostUrl, ollama, sglang, vllm }: BenchmarkRunnerProps) {
   const cached = _stateCache.get(hostUrl);
   const [presets, setPresets] = useState<Record<string, Preset>>({});
   const [results, setResults] = useState<BenchmarkResult[]>(cached?.results ?? []);
   const [selectedModel, setSelectedModel] = useState(cached?.selectedModel ?? "");
-  const [selectedRuntime, setSelectedRuntime] = useState<"ollama" | "sglang">(cached?.selectedRuntime ?? "ollama");
+  const [selectedRuntime, setSelectedRuntime] = useState<"ollama" | "sglang" | "vllm">(cached?.selectedRuntime ?? "ollama");
   const [selectedPreset, setSelectedPreset] = useState(cached?.selectedPreset ?? "short");
   const [running, setRunning] = useState(cached?.running ?? false);
   const [latestResult, setLatestResult] = useState<BenchmarkResult | null>(cached?.latestResult ?? null);
@@ -116,23 +120,33 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang }: BenchmarkRunnerProp
     }
   }, [hostUrl]);
 
-  // Build available models list
-  const availableModels: { name: string; runtime: "ollama" | "sglang" }[] = [];
+  // Build available models list – use "runtime:model" as the Select value
+  // to guarantee uniqueness even if two runtimes serve the same model name.
+  const availableModels: { label: string; value: string; runtime: "ollama" | "sglang" | "vllm" }[] = [];
   if (ollama?.isAvailable && ollama.models.length > 0) {
-    ollama.models.forEach((m: any) =>
-      availableModels.push({ name: m.name || m.model, runtime: "ollama" })
-    );
+    ollama.models.forEach((m: any) => {
+      const name = m.name || m.model || "unknown";
+      availableModels.push({ label: name, value: `ollama:${name}`, runtime: "ollama" });
+    });
   }
   if (sglang?.isAvailable && sglang.models.length > 0) {
-    sglang.models.forEach((m: any) =>
-      availableModels.push({ name: m.id || m.name, runtime: "sglang" })
-    );
+    sglang.models.forEach((m: any) => {
+      const name = m.id || m.name || "unknown";
+      availableModels.push({ label: name, value: `sglang:${name}`, runtime: "sglang" });
+    });
+  }
+  if (vllm?.isAvailable && vllm.models.length > 0) {
+    vllm.models.forEach((m: any) => {
+      const name = m.id || m.name || "unknown";
+      availableModels.push({ label: name, value: `vllm:${name}`, runtime: "vllm" });
+    });
   }
 
-  // Auto-select first model (only if no cached selection)
+  // Auto-select first model (only if no cached selection or stale format)
   useEffect(() => {
-    if (!selectedModel && availableModels.length > 0) {
-      setSelectedModel(availableModels[0].name);
+    const isValid = selectedModel && availableModels.some((m) => m.value === selectedModel);
+    if (!isValid && availableModels.length > 0) {
+      setSelectedModel(availableModels[0].value);
       setSelectedRuntime(availableModels[0].runtime);
     }
   }, [availableModels.length]);
@@ -159,34 +173,73 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang }: BenchmarkRunnerProp
     setLatestResult(null);
     const base = getBaseUrl();
 
+    const modelName = selectedModel.replace(/^(ollama|sglang|vllm):/, "");
+    const errorResult = (msg: string): BenchmarkResult => ({
+      id: null,
+      model: modelName,
+      runtime: selectedRuntime,
+      prompt: "",
+      prompt_tokens: 0,
+      generated_tokens: 0,
+      tokens_per_second: 0,
+      time_to_first_token_ms: null,
+      total_duration_ms: 0,
+      status: "error",
+      error: msg,
+    });
+
     try {
       const resp = await fetch(proxyUrl(`${base}/api/benchmarks/run`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: selectedModel,
+          model: modelName,
           runtime: selectedRuntime,
           preset: selectedPreset,
         }),
       });
-      const data: BenchmarkResult = await resp.json();
-      setLatestResult(data);
-      // Prepend to history
-      setResults((prev) => [data, ...prev]);
+      let data: any;
+      try {
+        data = await resp.json();
+      } catch {
+        const result = errorResult(
+          resp.status === 504
+            ? "Benchmark timed out – try a shorter preset"
+            : `Server returned non-JSON response (HTTP ${resp.status})`
+        );
+        setLatestResult(result);
+        setResults((prev) => [result, ...prev]);
+        return;
+      }
+
+      if (!resp.ok || data.error) {
+        const result = errorResult(data.error || `HTTP ${resp.status}`);
+        setLatestResult(result);
+        setResults((prev) => [result, ...prev]);
+        return;
+      }
+
+      // Normalise – guarantee every field the UI expects is present
+      const result: BenchmarkResult = {
+        id: data.id ?? null,
+        model: data.model || modelName,
+        runtime: data.runtime || selectedRuntime,
+        prompt: data.prompt || "",
+        prompt_tokens: data.prompt_tokens ?? 0,
+        generated_tokens: data.generated_tokens ?? 0,
+        tokens_per_second: data.tokens_per_second ?? 0,
+        time_to_first_token_ms: data.time_to_first_token_ms ?? null,
+        total_duration_ms: data.total_duration_ms ?? 0,
+        status: data.status || "completed",
+        error: data.error,
+        metadata: data.metadata,
+        created_at: data.created_at,
+      };
+      setLatestResult(result);
+      setResults((prev) => [result, ...prev]);
     } catch (err) {
-      setLatestResult({
-        id: null,
-        model: selectedModel,
-        runtime: selectedRuntime,
-        prompt: "",
-        prompt_tokens: 0,
-        generated_tokens: 0,
-        tokens_per_second: 0,
-        time_to_first_token_ms: null,
-        total_duration_ms: 0,
-        status: "error",
-        error: err instanceof Error ? err.message : "Network error",
-      });
+      const result = errorResult(err instanceof Error ? err.message : "Network error");
+      setLatestResult(result);
     } finally {
       setRunning(false);
     }
@@ -244,7 +297,7 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang }: BenchmarkRunnerProp
                 value={selectedModel}
                 onValueChange={(val) => {
                   setSelectedModel(val);
-                  const found = availableModels.find((m) => m.name === val);
+                  const found = availableModels.find((m) => m.value === val);
                   if (found) setSelectedRuntime(found.runtime);
                 }}
               >
@@ -253,9 +306,9 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang }: BenchmarkRunnerProp
                 </SelectTrigger>
                 <SelectContent>
                   {availableModels.map((m) => (
-                    <SelectItem key={`${m.runtime}-${m.name}`} value={m.name}>
+                    <SelectItem key={m.value} value={m.value}>
                       <span className="flex items-center gap-2">
-                        {m.name}
+                        {m.label}
                         <Badge variant="secondary" className="text-[9px] h-4 px-1">
                           {m.runtime}
                         </Badge>
@@ -328,7 +381,7 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang }: BenchmarkRunnerProp
                     <MetricCard
                       icon={TrendingUp}
                       label="Tokens/sec"
-                      value={latestResult.tokens_per_second.toFixed(1)}
+                      value={(latestResult.tokens_per_second ?? 0).toFixed(1)}
                       color="text-emerald-500"
                     />
                     <MetricCard
@@ -421,7 +474,7 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang }: BenchmarkRunnerProp
                             </Badge>
                           </td>
                           <td className="py-2 pr-3 text-right font-mono">
-                            {r.status === "error" ? "—" : r.tokens_per_second.toFixed(1)}
+                            {r.status === "error" ? "—" : (r.tokens_per_second ?? 0).toFixed(1)}
                           </td>
                           <td className="py-2 pr-3 text-right font-mono">
                             {r.status === "error" ? "—" : r.generated_tokens}

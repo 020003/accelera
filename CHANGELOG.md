@@ -3,9 +3,9 @@
 ## [2.1.0] — 2026-04-07
 
 ### Added
-- **GPU Process Inspector** — new `Processes` tab per host with deep process analysis: PID, resolved name, command line, user, VRAM usage, uptime, CPU%, AI runtime detection (Ollama/SGLang/vLLM/Triton/PyTorch), and model name resolution via Ollama `/api/ps` and SGLang `/v1/models`; auto-refreshes every 10 seconds
+- **GPU Process Inspector** — new `Processes` tab per host with deep process analysis: PID, resolved name, command line, user, VRAM usage, uptime, CPU%, AI runtime detection (Ollama/SGLang/vLLM/Triton/PyTorch), and model name resolution via Ollama `/api/ps`, SGLang `/v1/models`, and vLLM `/v1/models`; auto-refreshes every 10 seconds
 - **Enriched GPU card processes** — process list on GPU cards now shows resolved names, runtime badges, model names, and AI category indicators instead of bare PIDs
-- **AI Model Benchmark Runner** — new `Benchmark` tab to test Ollama/SGLang model throughput with preset prompts; measures tokens/sec, TTFT, generated tokens, total duration; results persisted in SQLite
+- **AI Model Benchmark Runner** — new `Benchmark` tab to test Ollama/SGLang/vLLM model throughput with preset prompts; measures tokens/sec, TTFT, generated tokens, total duration; results persisted in SQLite
 - **Webhook notifications** — enhanced alert webhook delivery with auto-detection of Slack (Block Kit), Discord (embeds), and generic HTTP; new endpoints `GET/PUT /api/alerts/webhook`, `POST /api/alerts/webhook/test`
 - **SGLang Runtime integration** — auto-discovery via `/api/sglang/discover`, UI badges, model counts, and per-host tags mirroring the existing Ollama pattern
 - **SGLang token tracking** — backend scrapes SGLang usage statistics for TPS, latency, and request counts
@@ -15,6 +15,10 @@
 - **Dynamic currency selection** — `useCurrency` hook with currency selector in Settings; all cost displays reflect the chosen currency
 - **Production Docker build** — multi-stage `Dockerfile` (Node build → nginx), `nginx.conf` with SPA routing, gzip, asset caching, and `/health` endpoint; `.dockerignore` for faster builds
 - **GPU exporter `/health` endpoint** — returns host info, GPU count, and uptime
+- **vLLM integration** — auto-discovery via `/api/vllm/discover`, UI badges, model counts, and per-host tags mirroring the existing Ollama pattern
+- **vLLM token tracking** — backend scrapes vLLM usage statistics for TPS, latency, and request counts
+- **vLLM model benchmarking** — new `Benchmark` tab to test vLLM model throughput with preset prompts; measures tokens/sec, TTFT, generated tokens, total duration; results persisted in SQLite
+- **Helm chart** — production-ready `helm/accelera/` chart for Kubernetes and OpenShift; GPU exporter as DaemonSet with `hostNetwork`/`hostPID`/`privileged`, frontend Deployment with auto-detected cluster DNS, Ingress (K8s) or Route + SCC (OpenShift), configurable via `values.yaml`
 
 ### Fixed
 - **Advanced Visualizations light mode** — replaced hardcoded dark-only colors in `GPUTopologyMap`, `GPU3DHeatmap`, and global CSS with theme-aware values

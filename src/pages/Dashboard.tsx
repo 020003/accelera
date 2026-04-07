@@ -52,6 +52,7 @@ export default function Dashboard() {
   const [vizRefreshing, setVizRefreshing] = useState(false);
   const [ollamaStatus, setOllamaStatus] = useState<Record<string, any>>({});
   const [sglangStatus, setSglangStatus] = useState<Record<string, any>>({});
+  const [vllmStatus, setVllmStatus] = useState<Record<string, any>>({});
   
   // Create a Map for the PowerUsageChart
   const hostDataMap = new Map(
@@ -154,6 +155,30 @@ export default function Dashboard() {
       
       return { isAvailable: false };
     } catch (error) {
+      return { isAvailable: false };
+    }
+  };
+
+  // Helper function to check if vLLM is available on a host
+  const checkVllmAvailability = async (hostUrl: string) => {
+    try {
+      const url = new URL(hostUrl);
+      const baseUrl = `${url.protocol}//${url.host}`;
+      
+      const response = await fetch(proxyUrl(`${baseUrl}/api/vllm/discover`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hostUrl: baseUrl }),
+        signal: AbortSignal.timeout(3000)
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        if (result.isAvailable) return result;
+      }
+      
+      return { isAvailable: false };
+    } catch {
       return { isAvailable: false };
     }
   };
@@ -333,6 +358,56 @@ export default function Dashboard() {
         );
       }
 
+      // Check for vLLM availability (same caching pattern)
+      const cachedVllmStatus = vllmStatus[hostKey];
+      
+      if (!cachedVllmStatus || (now - cachedVllmStatus.lastChecked) > 300000) {
+        checkVllmAvailability(host.url).then(vllmInfo => {
+          const newVllmStatus = { ...vllmInfo, lastChecked: now };
+          
+          setVllmStatus(prev => ({ ...prev, [hostKey]: newVllmStatus }));
+          
+          if (vllmInfo.isAvailable) {
+            setHostsData(prevData => 
+              prevData.map(h => 
+                h.url === host.url 
+                  ? { 
+                      ...h, 
+                      vllm: {
+                        isAvailable: true,
+                        models: vllmInfo.models || [],
+                        vllmUrl: vllmInfo.vllmUrl,
+                        version: vllmInfo.version,
+                      }
+                    }
+                  : h
+              )
+            );
+          }
+        }).catch(() => {
+          setVllmStatus(prev => ({
+            ...prev,
+            [hostKey]: { isAvailable: false, lastChecked: now }
+          }));
+        });
+      } else if (cachedVllmStatus.isAvailable) {
+        setHostsData(prevData => 
+          prevData.map(h => 
+            h.url === host.url 
+              ? { 
+                  ...h, 
+                  vllm: {
+                    isAvailable: true,
+                    models: cachedVllmStatus.models || [],
+                    vllmUrl: cachedVllmStatus.vllmUrl,
+                    version: cachedVllmStatus.version,
+                  }
+                }
+              : h
+          )
+        );
+      }
+
       return hostData;
     } catch (error) {
       return {
@@ -400,9 +475,10 @@ export default function Dashboard() {
             newData[existingIndex] = {
               ...existing,
               ...newHostData,
-              // Preserve ollama/sglang data if it exists and new data doesn't have it
+              // Preserve ollama/sglang/vllm data if it exists and new data doesn't have it
               ollama: newHostData.ollama || existing.ollama,
-              sglang: newHostData.sglang || existing.sglang
+              sglang: newHostData.sglang || existing.sglang,
+              vllm: newHostData.vllm || existing.vllm
             };
             hasChanges = true;
           }
@@ -494,9 +570,11 @@ export default function Dashboard() {
   const totalGpus = connectedHosts.reduce((sum, host) => sum + host.gpus.length, 0);
   const totalOllamaModels = hostsData.reduce((sum, host) => sum + (host.ollama?.models.length || 0), 0);
   const totalSglangModels = hostsData.reduce((sum, host) => sum + (host.sglang?.models.length || 0), 0);
-  const totalAiModels = totalOllamaModels + totalSglangModels;
+  const totalVllmModels = hostsData.reduce((sum, host) => sum + (host.vllm?.models.length || 0), 0);
+  const totalAiModels = totalOllamaModels + totalSglangModels + totalVllmModels;
   const hostsWithOllama = hostsData.filter(h => h.ollama?.isAvailable).length;
   const hostsWithSglang = hostsData.filter(h => h.sglang?.isAvailable).length;
+  const hostsWithVllm = hostsData.filter(h => h.vllm?.isAvailable).length;
 
   return (
     <div className="min-h-screen bg-background">
@@ -541,6 +619,9 @@ export default function Dashboard() {
                 )}
                 {host.sglang?.isAvailable && (
                   <span className="text-[9px] px-1 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-medium leading-none">S</span>
+                )}
+                {host.vllm?.isAvailable && (
+                  <span className="text-[9px] px-1 py-0.5 rounded bg-orange-500/10 text-orange-400 font-medium leading-none">V</span>
                 )}
               </TabsTrigger>
             ))}
@@ -623,6 +704,7 @@ export default function Dashboard() {
                 onRefresh={fetchAllHostsData}
                 ollama={host.ollama}
                 sglang={host.sglang}
+                vllm={host.vllm}
               />
             </TabsContent>
           ))}

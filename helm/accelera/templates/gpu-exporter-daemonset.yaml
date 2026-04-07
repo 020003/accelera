@@ -1,0 +1,101 @@
+{{- if .Values.gpuExporter.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "accelera.fullname" . }}-gpu-exporter
+  labels:
+    {{- include "accelera.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gpu-exporter
+spec:
+  selector:
+    matchLabels:
+      {{- include "accelera.gpuExporter.selectorLabels" . | nindent 6 }}
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        {{- include "accelera.labels" . | nindent 8 }}
+        {{- include "accelera.gpuExporter.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: gpu-exporter
+      {{- with .Values.gpuExporter.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- include "accelera.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "accelera.gpuExporter.serviceAccountName" . }}
+      {{- with .Values.gpuExporter.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.gpuExporter.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.gpuExporter.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      hostNetwork: {{ .Values.gpuExporter.hostNetwork }}
+      {{- if .Values.gpuExporter.hostNetwork }}
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
+      hostPID: {{ .Values.gpuExporter.hostPID }}
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: gpu-exporter
+          image: {{ include "accelera.gpuExporter.image" . }}
+          imagePullPolicy: {{ .Values.gpuExporter.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 5000
+              {{- if .Values.gpuExporter.hostNetwork }}
+              hostPort: 5000
+              {{- end }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "accelera.fullname" . }}-config
+          {{- with .Values.gpuExporter.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            privileged: {{ .Values.gpuExporter.privileged }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: host-proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: host-proc
+          hostPath:
+            path: /proc
+            type: Directory
+        - name: data
+          {{- if .Values.gpuExporter.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "accelera.fullname" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}

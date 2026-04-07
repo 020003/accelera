@@ -51,6 +51,12 @@ interface HostTabProps {
     sglangUrl?: string;
     serverInfo?: any;
   };
+  vllm?: {
+    isAvailable: boolean;
+    models: any[];
+    vllmUrl?: string;
+    version?: string;
+  };
 }
 
 function formatBytes(bytes: number): string {
@@ -74,6 +80,7 @@ export function HostTab({
   onRefresh,
   ollama,
   sglang,
+  vllm,
 }: HostTabProps) {
   const [tokenHours, setTokenHours] = useState(24);
   const { data: tokenStats, isLoading: tokenLoading } = useTokenStats(hostUrl, tokenHours);
@@ -125,6 +132,12 @@ export function HostTab({
                 <Badge variant="secondary" className="text-[10px] h-5 gap-1 bg-cyan-500/10 text-cyan-400">
                   <Sparkles className="h-3 w-3" />
                   SGLang · {sglang.models.length} models
+                </Badge>
+              )}
+              {vllm?.isAvailable && (
+                <Badge variant="secondary" className="text-[10px] h-5 gap-1 bg-orange-500/10 text-orange-400">
+                  <Zap className="h-3 w-3" />
+                  vLLM · {vllm.models.length} models
                 </Badge>
               )}
             </h2>
@@ -208,29 +221,19 @@ export function HostTab({
                 color: "text-amber-500",
                 bg: "bg-amber-500/10",
               },
-              ...(ollama?.isAvailable
+              ...((ollama?.isAvailable || sglang?.isAvailable || vllm?.isAvailable)
                 ? [
                     {
                       label: "AI Models",
-                      value: (ollama?.models.length || 0) + (sglang?.models.length || 0),
+                      value: (ollama?.models.length || 0) + (sglang?.models.length || 0) + (vllm?.models.length || 0),
                       icon: Brain,
                       color: "text-purple-500",
                       bg: "bg-purple-500/10",
                       sub: [
                         ollama?.isAvailable ? `${ollama.models.length} Ollama` : "",
                         sglang?.isAvailable ? `${sglang.models.length} SGLang` : "",
+                        vllm?.isAvailable ? `${vllm.models.length} vLLM` : "",
                       ].filter(Boolean).join(" + "),
-                    },
-                  ]
-                : sglang?.isAvailable
-                ? [
-                    {
-                      label: "AI Models",
-                      value: sglang.models.length,
-                      icon: Brain,
-                      color: "text-cyan-500",
-                      bg: "bg-cyan-500/10",
-                      sub: `${sglang.models.length} SGLang`,
                     },
                   ]
                 : []),
@@ -284,11 +287,17 @@ export function HostTab({
                   SGLang ({sglang.models.length})
                 </TabsTrigger>
               )}
+              {vllm?.isAvailable && (
+                <TabsTrigger value="vllm" className="gap-1.5 text-xs">
+                  <Zap className="h-3.5 w-3.5" />
+                  vLLM ({vllm.models.length})
+                </TabsTrigger>
+              )}
               <TabsTrigger value="processes" className="gap-1.5 text-xs">
                 <Terminal className="h-3.5 w-3.5" />
                 Processes
               </TabsTrigger>
-              {(ollama?.isAvailable || sglang?.isAvailable) && (
+              {(ollama?.isAvailable || sglang?.isAvailable || vllm?.isAvailable) && (
                 <TabsTrigger value="benchmark" className="gap-1.5 text-xs">
                   <Timer className="h-3.5 w-3.5" />
                   Benchmark
@@ -393,13 +402,53 @@ export function HostTab({
               <ProcessInspector hostUrl={hostUrl} />
             </TabsContent>
 
-            {(ollama?.isAvailable || sglang?.isAvailable) && (
+            {(ollama?.isAvailable || sglang?.isAvailable || vllm?.isAvailable) && (
               <TabsContent value="benchmark" forceMount className="data-[state=inactive]:hidden">
                 <BenchmarkRunner
                   hostUrl={hostUrl}
                   ollama={ollama}
                   sglang={sglang}
+                  vllm={vllm}
                 />
+              </TabsContent>
+            )}
+
+            {vllm?.isAvailable && (
+              <TabsContent value="vllm">
+                {vllm.models.length === 0 ? (
+                  <Card>
+                    <CardContent className="flex flex-col items-center justify-center py-12">
+                      <Zap className="h-10 w-10 text-muted-foreground mb-3" />
+                      <p className="text-sm font-medium">No Models Loaded</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        No models are currently loaded in vLLM.
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                    {vllm.models.map((model: any) => (
+                      <Card
+                        key={model.id}
+                        className="shadow-none border-border/50"
+                      >
+                        <CardContent className="p-4 flex items-center gap-3">
+                          <div className="p-2 rounded-md bg-orange-500/10">
+                            <Zap className="h-4 w-4 text-orange-500" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium truncate">
+                              {model.id}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              vLLM{vllm.version ? ` v${vllm.version}` : ""}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
               </TabsContent>
             )}
 

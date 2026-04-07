@@ -1,0 +1,38 @@
+{{- if and .Values.gpuExporter.enabled .Values.openshift.enabled .Values.openshift.scc.enabled }}
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: {{ include "accelera.fullname" . }}-gpu-exporter
+  labels:
+    {{- include "accelera.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/description: >-
+      Allows the Accelera GPU exporter to run privileged with host PID
+      and host networking for NVIDIA GPU monitoring.
+allowPrivilegedContainer: true
+allowHostNetwork: true
+allowHostPorts: true
+allowHostPID: true
+allowHostIPC: false
+allowedCapabilities:
+  - "*"
+defaultAddCapabilities: []
+requiredDropCapabilities: []
+runAsUser:
+  type: RunAsAny
+seLinuxContext:
+  type: RunAsAny
+fsGroup:
+  type: RunAsAny
+supplementalGroups:
+  type: RunAsAny
+volumes:
+  - configMap
+  - emptyDir
+  - hostPath
+  - persistentVolumeClaim
+  - projected
+  - secret
+users:
+  - system:serviceaccount:{{ .Release.Namespace }}:{{ include "accelera.gpuExporter.serviceAccountName" . }}
+{{- end }}

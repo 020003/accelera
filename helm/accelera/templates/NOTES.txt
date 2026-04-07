@@ -1,0 +1,48 @@
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Accelera — GPU Acceleration Platform
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{{- if .Values.frontend.enabled }}
+
+1. Access the dashboard:
+{{- if and .Values.openshift.enabled .Values.openshift.route.enabled }}
+   {{- if .Values.openshift.route.host }}
+   URL: https://{{ .Values.openshift.route.host }}
+   {{- else }}
+   Run:  oc get route {{ include "accelera.fullname" . }} -n {{ .Release.Namespace }} -o jsonpath='{.spec.host}'
+   {{- end }}
+{{- else if .Values.frontend.ingress.enabled }}
+   {{- range .Values.frontend.ingress.hosts }}
+   URL: http://{{ .host }}
+   {{- end }}
+{{- else }}
+   kubectl port-forward svc/{{ include "accelera.fullname" . }}-frontend {{ .Values.frontend.service.port }}:{{ .Values.frontend.service.port }} -n {{ .Release.Namespace }}
+   Then open: http://localhost:{{ .Values.frontend.service.port }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.gpuExporter.enabled }}
+
+2. GPU Exporter DaemonSet:
+   The exporter runs on every node labeled {{ range $k, $v := .Values.gpuExporter.nodeSelector }}{{ $k }}={{ $v }}{{ end }}.
+   {{- if .Values.gpuExporter.hostNetwork }}
+   With hostNetwork, each exporter is reachable at <nodeIP>:5000.
+   {{- end }}
+
+   Label your GPU nodes if not already labelled:
+     kubectl label node <NODE_NAME> nvidia.com/gpu.present=true
+
+   Check exporter pods:
+     kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/component=gpu-exporter
+
+3. Add hosts in the dashboard:
+   Use the node IPs with port 5000, e.g.:
+     http://<node-ip>:5000/nvidia-smi.json
+{{- end }}
+
+{{- if and .Values.openshift.enabled .Values.openshift.scc.enabled .Values.gpuExporter.enabled }}
+
+4. OpenShift SCC:
+   A custom SecurityContextConstraints "{{ include "accelera.fullname" . }}-gpu-exporter"
+   was created to allow privileged GPU monitoring.
+{{- end }}

@@ -25,4 +25,10 @@ export interface HostData {
     sglangUrl?: string;
     serverInfo?: any;
   };
+  vllm?: {
+    isAvailable: boolean;
+    models: any[];
+    vllmUrl?: string;
+    version?: string;
+  };
 }

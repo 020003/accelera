@@ -271,7 +271,7 @@ _RUNTIME_RE = [
     (re.compile(r"torch|python.*train", re.I), "PyTorch"),
 ]
 
-_model_cache: dict = {"ts": 0.0, "ollama": [], "sglang": []}
+_model_cache: dict = {"ts": 0.0, "ollama": [], "sglang": [], "vllm": []}
 _MODEL_CACHE_TTL = 30  # seconds
 
 
@@ -294,6 +294,14 @@ def _refresh_model_cache():
         try:
             r = http_requests.get(f"{url}/v1/models", timeout=2)
             _model_cache["sglang"] = [m.get("id", "") for m in r.json().get("data", [])]
+        except Exception:
+            pass
+    # vLLM
+    url = cfg("VLLM_URL")
+    if url:
+        try:
+            r = http_requests.get(f"{url}/v1/models", timeout=2)
+            _model_cache["vllm"] = [m.get("id", "") for m in r.json().get("data", [])]
         except Exception:
             pass
 
@@ -343,6 +351,7 @@ def _enrich_processes(gpus: list[dict]):
     _refresh_model_cache()
     ollama_models = _model_cache["ollama"]
     sglang_models = _model_cache["sglang"]
+    vllm_models = _model_cache["vllm"]
 
     for gpu in gpus:
         for proc in gpu.get("processes", []):
@@ -359,6 +368,8 @@ def _enrich_processes(gpus: list[dict]):
                     model = best.get("name", "") or best.get("model", "")
             elif rt == "SGLang" and sglang_models:
                 model = sglang_models[0] if len(sglang_models) == 1 else ", ".join(sglang_models)
+            elif rt == "vLLM" and vllm_models:
+                model = vllm_models[0] if len(vllm_models) == 1 else ", ".join(vllm_models)
             proc["model"] = model
 
 

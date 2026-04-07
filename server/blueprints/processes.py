@@ -210,7 +210,20 @@ def _query_sglang_running_models() -> list[str]:
         return []
 
 
-def _match_model_to_process(proc: dict, ollama_models: list[dict], sglang_models: list[str]) -> str:
+def _query_vllm_running_models() -> list[str]:
+    """Query vLLM /v1/models for loaded models."""
+    url = cfg("VLLM_URL")
+    if not url:
+        return []
+    try:
+        resp = http_requests.get(f"{url}/v1/models", timeout=3)
+        data = resp.json()
+        return [m.get("id", "") for m in data.get("data", [])]
+    except Exception:
+        return []
+
+
+def _match_model_to_process(proc: dict, ollama_models: list[dict], sglang_models: list[str], vllm_models: list[str]) -> str:
     """Try to match a running AI model name to a process."""
     runtime = proc.get("runtime", "")
     mem_mib = proc.get("memory", 0)
@@ -230,6 +243,9 @@ def _match_model_to_process(proc: dict, ollama_models: list[dict], sglang_models
 
     if runtime == "SGLang" and sglang_models:
         return sglang_models[0] if len(sglang_models) == 1 else ", ".join(sglang_models)
+
+    if runtime == "vLLM" and vllm_models:
+        return vllm_models[0] if len(vllm_models) == 1 else ", ".join(vllm_models)
 
     return proc.get("model", "")
 
@@ -293,10 +309,11 @@ def list_processes():
     # Enrich model names from runtime APIs
     ollama_models = _query_ollama_running_models() if any(p.get("runtime") == "Ollama" for p in processes) else []
     sglang_models = _query_sglang_running_models() if any(p.get("runtime") == "SGLang" for p in processes) else []
+    vllm_models = _query_vllm_running_models() if any(p.get("runtime") == "vLLM" for p in processes) else []
 
     for p in processes:
         if not p.get("model") and p.get("runtime"):
-            p["model"] = _match_model_to_process(p, ollama_models, sglang_models)
+            p["model"] = _match_model_to_process(p, ollama_models, sglang_models, vllm_models)
 
     processes.sort(key=lambda p: p["memory"], reverse=True)
 

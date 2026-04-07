@@ -21,6 +21,7 @@ services:
       # Use host.docker.internal to reach services on the Docker host.
       - OLLAMA_URL=http://host.docker.internal:11434
       - SGLANG_URL=http://host.docker.internal:30000
+      - VLLM_URL=http://host.docker.internal:8000
       # If Ollama Prometheus metrics are on a different service/port
       # (e.g. ollama-metrics sidecar), set this explicitly:
       # - OLLAMA_METRICS_URL=http://host.docker.internal:11434/metrics
