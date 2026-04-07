@@ -4,6 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { GpuCard } from "./GpuCard";
 import { TokenStatsCard } from "./TokenStatsCard";
+import { BenchmarkRunner } from "./BenchmarkRunner";
+import { ProcessInspector } from "./ProcessInspector";
 import { useTokenStats } from "@/hooks/useTokenStats";
 import {
   Server,
@@ -19,6 +21,8 @@ import {
   Thermometer,
   Zap,
   Sparkles,
+  Timer,
+  Terminal,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -280,6 +284,16 @@ export function HostTab({
                   SGLang ({sglang.models.length})
                 </TabsTrigger>
               )}
+              <TabsTrigger value="processes" className="gap-1.5 text-xs">
+                <Terminal className="h-3.5 w-3.5" />
+                Processes
+              </TabsTrigger>
+              {(ollama?.isAvailable || sglang?.isAvailable) && (
+                <TabsTrigger value="benchmark" className="gap-1.5 text-xs">
+                  <Timer className="h-3.5 w-3.5" />
+                  Benchmark
+                </TabsTrigger>
+              )}
             </TabsList>
 
             {/* GPU cards */}
@@ -372,6 +386,20 @@ export function HostTab({
                     ))}
                   </div>
                 )}
+              </TabsContent>
+            )}
+
+            <TabsContent value="processes" forceMount className="data-[state=inactive]:hidden">
+              <ProcessInspector hostUrl={hostUrl} />
+            </TabsContent>
+
+            {(ollama?.isAvailable || sglang?.isAvailable) && (
+              <TabsContent value="benchmark" forceMount className="data-[state=inactive]:hidden">
+                <BenchmarkRunner
+                  hostUrl={hostUrl}
+                  ollama={ollama}
+                  sglang={sglang}
+                />
               </TabsContent>
             )}
 

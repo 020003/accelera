@@ -75,10 +75,12 @@ from blueprints.sse import sse_bp
 from blueprints.settings import settings_bp
 from blueprints.tokens import tokens_bp
 from blueprints.sglang import sglang_bp
+from blueprints.benchmarks import benchmarks_bp
+from blueprints.processes import processes_bp
 
 for bp in (gpu_bp, hosts_bp, ollama_bp, sglang_bp, topology_bp, health_bp,
            heatmap_bp, timeline_bp, prometheus_bp, alerts_bp, events_bp,
-           sse_bp, settings_bp, tokens_bp):
+           sse_bp, settings_bp, tokens_bp, benchmarks_bp, processes_bp):
     app.register_blueprint(bp)
 
 # -------------------------------------------------------------------

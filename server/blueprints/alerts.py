@@ -1,6 +1,7 @@
 """Alerting blueprint – threshold-based alerts with webhook/email notifications."""
 
 import json
+import logging
 import smtplib
 import threading
 import time
@@ -33,15 +34,67 @@ _fire_lock = threading.Lock()
 # Notification helpers
 # -------------------------------------------------------------------
 
-def _send_webhook(payload: dict):
-    """POST alert payload to configured webhook URL."""
-    url = ALERT_WEBHOOK_URL
+def _format_slack_payload(payload: dict) -> dict:
+    """Format alert payload as a Slack Block Kit message."""
+    severity = payload.get("severity", "warning")
+    color = "#ef4444" if severity == "critical" else "#f59e0b"
+    return {
+        "attachments": [{
+            "color": color,
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*{payload.get('rule_name', 'Alert')}*\n{payload.get('message', '')}",
+                    },
+                },
+                {
+                    "type": "context",
+                    "elements": [
+                        {"type": "mrkdwn", "text": f":bar_chart: `{payload.get('metric', '')}` = *{payload.get('value', '')}* (threshold: {payload.get('threshold', '')})"},
+                        {"type": "mrkdwn", "text": f":satellite: Host: {payload.get('host', '*')}"},
+                    ],
+                },
+            ],
+        }]
+    }
+
+
+def _format_discord_payload(payload: dict) -> dict:
+    """Format alert payload as a Discord embed."""
+    severity = payload.get("severity", "warning")
+    color = 0xEF4444 if severity == "critical" else 0xF59E0B
+    return {
+        "embeds": [{
+            "title": payload.get("rule_name", "Accelera Alert"),
+            "description": payload.get("message", ""),
+            "color": color,
+            "fields": [
+                {"name": "Metric", "value": f"`{payload.get('metric', '')}`", "inline": True},
+                {"name": "Value", "value": str(payload.get("value", "")), "inline": True},
+                {"name": "Threshold", "value": str(payload.get("threshold", "")), "inline": True},
+            ],
+        }]
+    }
+
+
+def _send_webhook(payload: dict, url: str | None = None):
+    """POST alert payload to webhook URL. Auto-detects Slack/Discord formatting."""
+    from config import cfg
+    url = url or cfg("ALERT_WEBHOOK_URL")
     if not url:
         return
     try:
-        http_requests.post(url, json=payload, timeout=5)
+        if "hooks.slack.com" in url or "slack" in url:
+            data = _format_slack_payload(payload)
+        elif "discord.com/api/webhooks" in url or "discord" in url:
+            data = _format_discord_payload(payload)
+        else:
+            data = payload
+        http_requests.post(url, json=data, timeout=5)
     except Exception as e:
-        print(f"[alerts] Webhook delivery failed: {e}")
+        logging.getLogger(__name__).warning("Webhook delivery failed: %s", e)
 
 
 def _send_email(subject: str, body: str):
@@ -61,7 +114,7 @@ def _send_email(subject: str, body: str):
                 server.login(ALERT_EMAIL_FROM, ALERT_EMAIL_PASSWORD)
             server.sendmail(ALERT_EMAIL_FROM, ALERT_EMAIL_TO.split(","), msg.as_string())
     except Exception as e:
-        print(f"[alerts] Email delivery failed: {e}")
+        logging.getLogger(__name__).warning("Email delivery failed: %s", e)
 
 
 # -------------------------------------------------------------------
@@ -304,3 +357,61 @@ def ack_event(event_id):
     if storage.acknowledge_alert(event_id):
         return jsonify({"message": "Acknowledged"})
     return jsonify({"error": "Event not found"}), 404
+
+
+@alerts_bp.route("/api/alerts/webhook", methods=["GET"])
+def get_webhook_config():
+    """Return the current webhook URL (masked for security)."""
+    from config import cfg
+    url = cfg("ALERT_WEBHOOK_URL")
+    return jsonify({
+        "url": url[:30] + "..." if len(url) > 30 else url,
+        "configured": bool(url),
+        "type": (
+            "slack" if url and ("hooks.slack.com" in url or "slack" in url)
+            else "discord" if url and ("discord.com" in url)
+            else "generic" if url
+            else "none"
+        ),
+    })
+
+
+@alerts_bp.route("/api/alerts/webhook", methods=["PUT"])
+def set_webhook_config():
+    """Update the webhook URL at runtime."""
+    from config import set_runtime, cfg
+    data = request.get_json()
+    if not data or "url" not in data:
+        return jsonify({"error": "Missing 'url' field"}), 400
+
+    url = data["url"].strip()
+    set_runtime("ALERT_WEBHOOK_URL", url)
+    storage.set_config("ALERT_WEBHOOK_URL", url)
+    return jsonify({"message": "Webhook URL updated", "configured": bool(url)})
+
+
+@alerts_bp.route("/api/alerts/webhook/test", methods=["POST"])
+def test_webhook():
+    """Send a test notification to the configured webhook."""
+    from config import cfg
+    url = cfg("ALERT_WEBHOOK_URL")
+    if not url:
+        return jsonify({"error": "No webhook URL configured"}), 400
+
+    test_payload = {
+        "rule_id": "test",
+        "rule_name": "Test Notification",
+        "metric": "temperature",
+        "value": 42,
+        "threshold": 85,
+        "gpu_id": "0",
+        "host": "test-host",
+        "message": "[Accelera Test] This is a test alert notification. If you see this, webhooks are working!",
+        "severity": "warning",
+        "created_at": time.time(),
+    }
+    try:
+        _send_webhook(test_payload, url)
+        return jsonify({"message": "Test notification sent"})
+    except Exception as e:
+        return jsonify({"error": f"Webhook delivery failed: {e}"}), 500

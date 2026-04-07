@@ -147,6 +147,24 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_token_snap_time
             ON token_snapshots(timestamp);
+
+        CREATE TABLE IF NOT EXISTS benchmark_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            model TEXT NOT NULL,
+            runtime TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            prompt_tokens INTEGER NOT NULL DEFAULT 0,
+            generated_tokens INTEGER NOT NULL DEFAULT 0,
+            tokens_per_second REAL NOT NULL DEFAULT 0,
+            time_to_first_token_ms REAL,
+            total_duration_ms REAL NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'completed',
+            error TEXT,
+            metadata TEXT,
+            created_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_bench_model
+            ON benchmark_results(model, created_at);
     """)
     db.commit()
 
@@ -505,3 +523,68 @@ def prune_old_token_snapshots():
         db.commit()
     except Exception:
         log.debug("Failed to prune token_snapshots", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# Benchmark results
+# ---------------------------------------------------------------------------
+
+def save_benchmark_result(result: dict) -> int | None:
+    """Persist a benchmark result and return its id."""
+    try:
+        db = _get_db()
+        cur = db.execute(
+            """INSERT INTO benchmark_results
+               (model, runtime, prompt, prompt_tokens, generated_tokens,
+                tokens_per_second, time_to_first_token_ms, total_duration_ms,
+                status, error, metadata, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                result["model"],
+                result["runtime"],
+                result["prompt"],
+                result.get("prompt_tokens", 0),
+                result.get("generated_tokens", 0),
+                result.get("tokens_per_second", 0),
+                result.get("time_to_first_token_ms"),
+                result.get("total_duration_ms", 0),
+                result.get("status", "completed"),
+                result.get("error"),
+                json.dumps(result.get("metadata", {})),
+                time.time(),
+            ),
+        )
+        db.commit()
+        return cur.lastrowid
+    except Exception:
+        log.exception("Failed to save benchmark result")
+        return None
+
+
+def get_benchmark_results(model: str | None = None, limit: int = 50) -> list[dict]:
+    """Return recent benchmark results, optionally filtered by model."""
+    try:
+        db = _get_db()
+        if model:
+            rows = db.execute(
+                "SELECT * FROM benchmark_results WHERE model = ? ORDER BY created_at DESC LIMIT ?",
+                (model, limit),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT * FROM benchmark_results ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            if d.get("metadata"):
+                try:
+                    d["metadata"] = json.loads(d["metadata"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            results.append(d)
+        return results
+    except Exception:
+        log.exception("Failed to load benchmark results")
+        return []

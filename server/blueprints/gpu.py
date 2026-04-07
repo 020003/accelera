@@ -1,12 +1,17 @@
 """GPU metrics blueprint – nvidia-smi endpoint and process detection."""
 
 import logging
+import os
+import re
 import socket
 import subprocess
+import time
 from datetime import datetime
 
+import requests as http_requests
 from flask import Blueprint, jsonify
 
+from config import cfg
 from utils import run_cmd
 
 log = logging.getLogger(__name__)
@@ -128,7 +133,6 @@ def _add_process_info(gpus: list[dict]):
     # Method 2: nvidia-smi XML query
     if appended == 0:
         try:
-            import re
             xml = run_cmd("nvidia-smi -x -q")
             for gpu_block in re.findall(r"<gpu>(.*?)</gpu>", xml, flags=re.S):
                 uuid_match = re.search(r"<uuid>\s*([^<]+)\s*</uuid>", gpu_block)
@@ -247,7 +251,115 @@ def _add_process_info(gpus: list[dict]):
 
     if appended > 0:
         log.debug("Attached %d process(es) to %d GPU(s)", appended, len(gpus))
+    _enrich_processes(gpus)
     return gpus
+
+
+# -------------------------------------------------------------------
+# Process enrichment (name resolution, runtime & model detection)
+# -------------------------------------------------------------------
+
+_AI_RE = re.compile(
+    r"(ollama|python|sglang|vllm|triton|tensorrt|torch|llama|ggml|whisper)",
+    re.IGNORECASE,
+)
+_RUNTIME_RE = [
+    (re.compile(r"ollama", re.I), "Ollama"),
+    (re.compile(r"sglang", re.I), "SGLang"),
+    (re.compile(r"vllm", re.I), "vLLM"),
+    (re.compile(r"triton", re.I), "Triton"),
+    (re.compile(r"torch|python.*train", re.I), "PyTorch"),
+]
+
+_model_cache: dict = {"ts": 0.0, "ollama": [], "sglang": []}
+_MODEL_CACHE_TTL = 30  # seconds
+
+
+def _refresh_model_cache():
+    now = time.time()
+    if now - _model_cache["ts"] < _MODEL_CACHE_TTL:
+        return
+    _model_cache["ts"] = now
+    # Ollama
+    url = cfg("OLLAMA_URL")
+    if url:
+        try:
+            r = http_requests.get(f"{url}/api/ps", timeout=2)
+            _model_cache["ollama"] = r.json().get("models", [])
+        except Exception:
+            pass
+    # SGLang
+    url = cfg("SGLANG_URL")
+    if url:
+        try:
+            r = http_requests.get(f"{url}/v1/models", timeout=2)
+            _model_cache["sglang"] = [m.get("id", "") for m in r.json().get("data", [])]
+        except Exception:
+            pass
+
+
+def _read_cmdline(pid: int) -> str:
+    for root in ("/host/proc", "/proc"):
+        try:
+            with open(f"{root}/{pid}/cmdline", "rb") as f:
+                return f.read(4096).replace(b"\x00", b" ").decode("utf-8", errors="replace").strip()
+        except (OSError, PermissionError):
+            continue
+    return ""
+
+
+def _enrich_processes(gpus: list[dict]):
+    """Post-process: resolve names, detect runtime & model for each process."""
+    has_ai = False
+    for gpu in gpus:
+        for proc in gpu.get("processes", []):
+            pid = proc.get("pid", 0)
+            cmdline = _read_cmdline(pid)
+            proc["cmdline"] = cmdline[:300] if cmdline else ""
+
+            # Resolve name from cmdline if it's just "PID xxx"
+            name = proc.get("name", "")
+            if name.startswith("PID ") and cmdline:
+                proc["name"] = os.path.basename(cmdline.split()[0]) if cmdline.split() else name
+
+            # Detect runtime
+            runtime = ""
+            for pat, label in _RUNTIME_RE:
+                if pat.search(cmdline):
+                    runtime = label
+                    break
+            proc["runtime"] = runtime
+
+            # Category
+            proc["category"] = "ai" if _AI_RE.search(f"{proc['name']} {cmdline}") else "other"
+
+            if runtime:
+                has_ai = True
+
+    if not has_ai:
+        return
+
+    # Resolve model names from cached runtime API data
+    _refresh_model_cache()
+    ollama_models = _model_cache["ollama"]
+    sglang_models = _model_cache["sglang"]
+
+    for gpu in gpus:
+        for proc in gpu.get("processes", []):
+            rt = proc.get("runtime", "")
+            model = ""
+            if rt == "Ollama" and ollama_models:
+                mem = proc.get("memory", 0)
+                best, best_diff = None, float("inf")
+                for m in ollama_models:
+                    diff = abs(m.get("size_vram", 0) / (1024 * 1024) - mem)
+                    if diff < best_diff:
+                        best_diff, best = diff, m
+                if best and best_diff < 2048:
+                    model = best.get("name", "") or best.get("model", "")
+            elif rt == "SGLang" and sglang_models:
+                model = sglang_models[0] if len(sglang_models) == 1 else ", ".join(sglang_models)
+            proc["model"] = model
 
 
 # -------------------------------------------------------------------

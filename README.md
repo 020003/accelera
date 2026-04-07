@@ -34,10 +34,23 @@ Real-time monitoring, AI workload management, and cluster analytics for NVIDIA G
 - **AI workload timeline** — vis-timeline Gantt chart of model loading, inference, training, and GPU allocation events
 - **Compact legends & time picker** — inline colored-dot legends, per-tab refresh, heatmap time range selector
 
+### GPU Process Inspector
+- **Deep process analysis** — PID, resolved name, command line, user, VRAM, uptime, CPU%
+- **AI runtime detection** — automatically identifies Ollama, SGLang, vLLM, Triton, PyTorch processes
+- **Model name resolution** — queries Ollama `/api/ps` and SGLang `/v1/models` to match running models
+- **Auto-refresh** — 10-second polling for near-real-time process monitoring
+- **Enriched GPU cards** — process list on GPU cards shows resolved names, runtime badges, and model info
+
+### AI Model Benchmark Runner
+- **One-click benchmarks** — test Ollama and SGLang model throughput with preset prompts
+- **Key metrics** — tokens/sec, time-to-first-token, generated tokens, total duration
+- **Benchmark history** — results persisted in SQLite, viewable in a collapsible table
+
 ### Alerting & Events
 - **Custom alert rules** — threshold-based alerts on any GPU metric (utilization, temp, power, memory)
 - **GPU health events** — NVML error detection and dmesg Xid parsing
-- **Webhook & email notifications** — configurable alert delivery
+- **Webhook notifications** — Slack (Block Kit), Discord (embeds), and generic HTTP webhook delivery with auto-detection
+- **Email notifications** — SMTP-based alert delivery
 
 ### Security
 - **URL validation** — all host/Ollama URLs validated before use (SSRF protection)
@@ -158,6 +171,12 @@ See [`.env.example`](.env.example) for the full list.
 | `GET/POST` | `/api/alerts/rules` | Alert rule CRUD |
 | `GET` | `/api/alerts/events` | Alert event history |
 | `GET/PUT` | `/api/settings` | Runtime configuration |
+| `GET` | `/api/gpu/processes` | Enriched GPU process list (PID, name, user, uptime, CPU%, model) |
+| `GET` | `/api/benchmarks/presets` | Benchmark prompt presets |
+| `POST` | `/api/benchmarks/run` | Run a benchmark against Ollama or SGLang |
+| `GET` | `/api/benchmarks/results` | Benchmark result history |
+| `GET/PUT` | `/api/alerts/webhook` | Webhook configuration |
+| `POST` | `/api/alerts/webhook/test` | Send test webhook notification |
 
 ---
 

@@ -10,7 +10,9 @@ import {
   Zap, 
   Fan,
   Cpu,
-  Clock
+  Clock,
+  Brain,
+  Box,
 } from "lucide-react";
 
 interface GpuCardProps {
@@ -161,15 +163,29 @@ export const GpuCard = memo(function GpuCard({ gpu, energyRate = 0, currencySymb
               <Clock className="h-4 w-4 text-emerald" />
               <span className="text-sm font-medium">Running Processes ({gpu.processes.length})</span>
             </div>
-            <div className="space-y-1 max-h-32 overflow-y-auto">
-              {gpu.processes.map((process) => (
-                <div key={process.pid} className="process-item">
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+              {gpu.processes.map((process: any) => (
+                <div key={process.pid} className={`process-item ${process.category === 'ai' ? 'border-l-2 border-purple-500/40 pl-2' : ''}`}>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">{process.name}</div>
+                    <div className="flex items-center gap-1.5">
+                      {process.category === 'ai' && <Brain className="h-3 w-3 text-purple-500 shrink-0" />}
+                      <span className="text-sm font-medium truncate">{process.name}</span>
+                      {process.runtime && (
+                        <span className="text-[10px] px-1 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
+                          {process.runtime}
+                        </span>
+                      )}
+                    </div>
+                    {process.model && (
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <Box className="h-2.5 w-2.5 text-purple-400" />
+                        <span className="text-[11px] font-medium text-purple-400 truncate">{process.model}</span>
+                      </div>
+                    )}
                     <div className="text-xs text-muted-foreground">PID: {process.pid}</div>
                   </div>
                   <div className="text-sm font-mono font-bold text-gpu-blue">
-                    {process.memory} MB
+                    {fmtMem(process.memory)}
                   </div>
                 </div>
               ))}

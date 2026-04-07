@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
-import { Bell, Plus, Trash2, Check, AlertTriangle, AlertCircle, Clock } from "lucide-react";
+import { Bell, Plus, Trash2, Check, AlertTriangle, AlertCircle, Clock, Webhook, Send, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   useAlertRules,
@@ -76,6 +76,11 @@ export function AlertsManager() {
   const [formCooldown, setFormCooldown] = useState("300");
   const [formWebhook, setFormWebhook] = useState(false);
   const [formEmail, setFormEmail] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookConfigured, setWebhookConfigured] = useState(false);
+  const [webhookType, setWebhookType] = useState("none");
+  const [webhookSaving, setWebhookSaving] = useState(false);
+  const [webhookTesting, setWebhookTesting] = useState(false);
 
   const resetForm = () => {
     setFormName("");
@@ -149,6 +154,12 @@ export function AlertsManager() {
                 <Badge variant="destructive" className="ml-1 h-5 min-w-[20px] px-1 text-xs">
                   {unacknowledgedCount}
                 </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="webhook" className="gap-1.5">
+              <Webhook className="h-4 w-4" /> Webhook
+              {webhookConfigured && (
+                <div className="w-2 h-2 bg-emerald-500 rounded-full" />
               )}
             </TabsTrigger>
           </TabsList>
@@ -341,6 +352,125 @@ export function AlertsManager() {
               </CardContent>
             </Card>
           ))}
+        </TabsContent>
+
+        {/* Webhook config tab */}
+        <TabsContent value="webhook" className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Webhook className="h-4 w-4 text-blue-500" />
+                Webhook Notifications
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-xs text-muted-foreground">
+                Configure a webhook URL to receive alert notifications. Slack and Discord URLs are auto-detected and formatted with rich embeds.
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="https://hooks.slack.com/services/... or Discord webhook URL"
+                  value={webhookUrl}
+                  onChange={(e) => setWebhookUrl(e.target.value)}
+                  className="flex-1 text-sm"
+                />
+                <Button
+                  size="sm"
+                  disabled={webhookSaving}
+                  onClick={async () => {
+                    setWebhookSaving(true);
+                    try {
+                      const resp = await fetch("/api/alerts/webhook", {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ url: webhookUrl }),
+                      });
+                      if (resp.ok) {
+                        const data = await resp.json();
+                        setWebhookConfigured(data.configured);
+                        setWebhookType(
+                          webhookUrl.includes("slack") ? "slack"
+                          : webhookUrl.includes("discord") ? "discord"
+                          : webhookUrl ? "generic" : "none"
+                        );
+                        toast.success("Webhook URL saved");
+                      } else {
+                        toast.error("Failed to save webhook URL");
+                      }
+                    } catch {
+                      toast.error("Failed to save webhook URL");
+                    } finally {
+                      setWebhookSaving(false);
+                    }
+                  }}
+                >
+                  {webhookSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
+                </Button>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <div className={`w-2 h-2 rounded-full ${webhookConfigured ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
+                  {webhookConfigured
+                    ? `Configured (${webhookType === "slack" ? "Slack" : webhookType === "discord" ? "Discord" : "Generic HTTP"})`
+                    : "Not configured"}
+                </div>
+                {webhookConfigured && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 h-7 text-xs"
+                    disabled={webhookTesting}
+                    onClick={async () => {
+                      setWebhookTesting(true);
+                      try {
+                        const resp = await fetch("/api/alerts/webhook/test", {
+                          method: "POST",
+                        });
+                        if (resp.ok) {
+                          toast.success("Test notification sent!");
+                        } else {
+                          const data = await resp.json();
+                          toast.error(data.error || "Test failed");
+                        }
+                      } catch {
+                        toast.error("Failed to send test");
+                      } finally {
+                        setWebhookTesting(false);
+                      }
+                    }}
+                  >
+                    {webhookTesting ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Send className="h-3 w-3" />
+                    )}
+                    Send Test
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-4">
+              <div className="grid gap-3 text-xs">
+                <div className="font-medium text-sm">Supported Webhooks</div>
+                <div className="grid sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <div className="font-medium">Slack</div>
+                    <p className="text-muted-foreground">Rich Block Kit messages with color-coded severity, metric details, and host info.</p>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="font-medium">Discord</div>
+                    <p className="text-muted-foreground">Embedded messages with severity colors, inline metric/value/threshold fields.</p>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="font-medium">Generic HTTP</div>
+                    <p className="text-muted-foreground">Raw JSON POST with full alert payload (rule, metric, value, severity).</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

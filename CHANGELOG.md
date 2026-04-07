@@ -1,8 +1,12 @@
 # Changelog
 
-## [2.1.0] — 2026-03-27
+## [2.1.0] — 2026-04-07
 
 ### Added
+- **GPU Process Inspector** — new `Processes` tab per host with deep process analysis: PID, resolved name, command line, user, VRAM usage, uptime, CPU%, AI runtime detection (Ollama/SGLang/vLLM/Triton/PyTorch), and model name resolution via Ollama `/api/ps` and SGLang `/v1/models`; auto-refreshes every 10 seconds
+- **Enriched GPU card processes** — process list on GPU cards now shows resolved names, runtime badges, model names, and AI category indicators instead of bare PIDs
+- **AI Model Benchmark Runner** — new `Benchmark` tab to test Ollama/SGLang model throughput with preset prompts; measures tokens/sec, TTFT, generated tokens, total duration; results persisted in SQLite
+- **Webhook notifications** — enhanced alert webhook delivery with auto-detection of Slack (Block Kit), Discord (embeds), and generic HTTP; new endpoints `GET/PUT /api/alerts/webhook`, `POST /api/alerts/webhook/test`
 - **SGLang Runtime integration** — auto-discovery via `/api/sglang/discover`, UI badges, model counts, and per-host tags mirroring the existing Ollama pattern
 - **SGLang token tracking** — backend scrapes SGLang usage statistics for TPS, latency, and request counts
 - **Token-based alerts** — alert rules can now target `tps`, `total_tokens`, `request_count`, and `avg_latency` metrics (fleet-level)
@@ -31,6 +35,8 @@
 - **Security headers** — added `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` to nginx
 - **SHA-256 password hashing** — replaced weak 32-bit DJB2 hash with Web Crypto SHA-256; legacy hashes auto-upgrade on next login
 - **Secret masking** — `FLASK_SECRET_KEY` and `ALERT_EMAIL_PASSWORD` are never exposed to the frontend API
+- **Traceback leak fix** — topology API no longer returns Python tracebacks in error responses
+- **Logging hygiene** — replaced bare `print()` calls in alerts.py with proper `logging` module
 
 ### Removed
 - **AIWorkloadTimeline** — component, all references, and vis-timeline CSS removed

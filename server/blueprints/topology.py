@@ -1,5 +1,6 @@
 """GPU topology blueprint – topology map and network interface detection."""
 
+import logging
 import re
 import socket
 
@@ -301,5 +302,5 @@ def get_topology():
     try:
         return jsonify(detect_gpu_topology())
     except Exception as e:
-        import traceback
-        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+        logging.getLogger(__name__).exception("Topology detection failed")
+        return jsonify({"error": "Topology detection failed"}), 500
