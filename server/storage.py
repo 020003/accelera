@@ -471,20 +471,35 @@ def get_token_stats(hours: int = 24) -> dict:
 
     # Merge into unified time buckets
     bucket_map: dict[int, dict] = {}
+    gap_threshold = bucket_sec * 2  # skip deltas across large time gaps
+    # Max plausible tokens per scrape interval (~60s). A fast GPU can
+    # produce ~5000 tok/s; 60s × 5000 = 300K.  Use a generous cap to
+    # filter out impossible counter jumps (proxy restart, counter seed).
+    max_delta_per_interval = 500_000
     for model, pts in series_by_model.items():
+        prev_ts = pts[0][0] if pts else 0
         prev_gen = pts[0][1] if pts else 0
         prev_pt = pts[0][2] if pts else 0
         for ts, gen, pt in pts[1:]:
             bk = int(ts // bucket_sec) * bucket_sec
             if bk not in bucket_map:
                 bucket_map[bk] = {"generated": 0, "prompt": 0}
+            # Skip deltas across large time gaps (e.g. exporter restart,
+            # or counter accumulated over hours/days without scraping).
+            if ts - prev_ts > gap_threshold:
+                prev_ts, prev_gen, prev_pt = ts, gen, pt
+                continue
             # Handle Prometheus counter resets: if current < previous,
             # the counter was restarted and the new value is the delta.
             dg = gen - prev_gen if gen >= prev_gen else gen
             dp = pt - prev_pt if pt >= prev_pt else pt
+            # Cap implausible per-interval spikes (counter seed/jump)
+            if dg > max_delta_per_interval or dp > max_delta_per_interval:
+                prev_ts, prev_gen, prev_pt = ts, gen, pt
+                continue
             bucket_map[bk]["generated"] += dg
             bucket_map[bk]["prompt"] += dp
-            prev_gen, prev_pt = gen, pt
+            prev_ts, prev_gen, prev_pt = ts, gen, pt
 
     history = []
     for bk in sorted(bucket_map):
