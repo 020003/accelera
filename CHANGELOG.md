@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.1.1] — 2026-04-09
+
+### Fixed
+- **Ollama `/v1/chat/completions` token tracking** — patched the `ollama-metrics` sidecar proxy to parse real `usage.prompt_tokens` and `usage.completion_tokens` from OpenAI-compatible endpoint responses (both streaming and non-streaming); previously only `/api/generate` and `/api/chat` tokens were counted
+- **Streaming token injection** — proxy now injects `stream_options.include_usage=true` into streaming `/v1/` requests so Ollama returns token counts in the final SSE chunk, ensuring accurate metrics regardless of client configuration
+- **Scientific notation in Prometheus metrics** — all regex patterns in `tokens.py` (Ollama, SGLang, vLLM) updated from `[\d.]+` to `[\d.eE+\-]+` to correctly parse large counter values reported in scientific notation (e.g. `1.636532e+06`)
+- **Token timeline graphs empty after counter reset** — `storage.py` now handles Prometheus counter resets (e.g. after proxy restart) by treating the new value as the delta instead of clamping to zero
+- **SQLite disk-full resilience** — `prune_old_history()` and `prune_old_token_snapshots()` now execute `PRAGMA wal_checkpoint(TRUNCATE)` after pruning to reclaim WAL disk space; database connections are recycled on error to prevent poisoned connection state
+- **Dockerfile fix for `ollama-metrics`** — corrected `COPY` binary name mismatch and bumped Go build image to `golang:1.24-alpine` to match `go.mod` requirements
+
+### Changed
+- **`ollama-metrics` proxy** — upgraded from upstream `ghcr.io/norskhelsenett/ollama-metrics:latest` to a patched build with full OpenAI-compatible API support; deployed to all GPU hosts
+
+### Security
+- **No new attack surface** — the `ollama-metrics` proxy patch only adds response body parsing for existing proxied traffic; no new network listeners, no secrets, no user input in queries
+
+---
+
 ## [2.1.0] — 2026-04-07
 
 ### Added

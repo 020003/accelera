@@ -85,22 +85,22 @@ _vllm_base_url = _resolve_vllm_base_url()
 
 # Pre-compiled patterns for the Prometheus text format
 _RE_GENERATED = re.compile(
-    r'^ollama_generated_tokens_total\{model="([^"]+)"\}\s+([\d.]+)', re.M
+    r'^ollama_generated_tokens_total\{model="([^"]+)"\}\s+([\d.eE+\-]+)', re.M
 )
 _RE_PROMPT = re.compile(
-    r'^ollama_prompt_tokens_total\{model="([^"]+)"\}\s+([\d.]+)', re.M
+    r'^ollama_prompt_tokens_total\{model="([^"]+)"\}\s+([\d.eE+\-]+)', re.M
 )
 _RE_REQ_DUR_COUNT = re.compile(
-    r'^ollama_request_duration_seconds_count\{endpoint="[^"]+",model="([^"]+)"\}\s+([\d.]+)', re.M
+    r'^ollama_request_duration_seconds_count\{endpoint="[^"]+",model="([^"]+)"\}\s+([\d.eE+\-]+)', re.M
 )
 _RE_REQ_DUR_SUM = re.compile(
-    r'^ollama_request_duration_seconds_sum\{endpoint="[^"]+",model="([^"]+)"\}\s+([\d.]+)', re.M
+    r'^ollama_request_duration_seconds_sum\{endpoint="[^"]+",model="([^"]+)"\}\s+([\d.eE+\-]+)', re.M
 )
 _RE_TPT_SUM = re.compile(
-    r'^ollama_time_per_token_seconds_sum\{model="([^"]+)"\}\s+([\d.]+)', re.M
+    r'^ollama_time_per_token_seconds_sum\{model="([^"]+)"\}\s+([\d.eE+\-]+)', re.M
 )
 _RE_TPT_COUNT = re.compile(
-    r'^ollama_time_per_token_seconds_count\{model="([^"]+)"\}\s+([\d.]+)', re.M
+    r'^ollama_time_per_token_seconds_count\{model="([^"]+)"\}\s+([\d.eE+\-]+)', re.M
 )
 
 
@@ -179,32 +179,32 @@ def _collect_ollama():
 
 # SGLang Prometheus metric patterns (covers multiple SGLang versions)
 _RE_SG_GEN = re.compile(
-    r'^sglang[_:]generation_tokens_total(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^sglang[_:]generation_tokens_total(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 _RE_SG_PROMPT = re.compile(
-    r'^sglang[_:]prompt_tokens_total(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^sglang[_:]prompt_tokens_total(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 _RE_SG_REQUESTS = re.compile(
-    r'^sglang[_:](?:num_requests_total|requests_total)(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^sglang[_:](?:num_requests_total|requests_total)(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 _RE_SG_E2E_SUM = re.compile(
-    r'^sglang[_:]e2e_request_latency_seconds_sum(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^sglang[_:]e2e_request_latency_seconds_sum(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 _RE_SG_E2E_COUNT = re.compile(
-    r'^sglang[_:]e2e_request_latency_seconds_count(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^sglang[_:]e2e_request_latency_seconds_count(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 _RE_SG_TTFT_SUM = re.compile(
-    r'^sglang[_:]time_to_first_token_seconds_sum(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^sglang[_:]time_to_first_token_seconds_sum(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 _RE_SG_TTFT_COUNT = re.compile(
-    r'^sglang[_:]time_to_first_token_seconds_count(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^sglang[_:]time_to_first_token_seconds_count(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 # Fallback: generic output/input tokens (some SGLang builds)
 _RE_SG_OUTPUT = re.compile(
-    r'^sglang[_:](?:output|completion)_tokens_total(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^sglang[_:](?:output|completion)_tokens_total(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 _RE_SG_INPUT = re.compile(
-    r'^sglang[_:](?:input|prompt)_tokens_total(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^sglang[_:](?:input|prompt)_tokens_total(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 
 
@@ -359,32 +359,32 @@ def _collect_sglang():
 # ---------------------------------------------------------------------------
 
 _RE_VLLM_GEN = re.compile(
-    r'^vllm:generation_tokens_total(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^vllm:generation_tokens_total(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 _RE_VLLM_PROMPT = re.compile(
-    r'^vllm:prompt_tokens_total(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^vllm:prompt_tokens_total(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 _RE_VLLM_REQUESTS = re.compile(
-    r'^vllm:(?:num_requests_total|request_success_total)(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^vllm:(?:num_requests_total|request_success_total)(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 _RE_VLLM_E2E_SUM = re.compile(
-    r'^vllm:e2e_request_latency_seconds_sum(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^vllm:e2e_request_latency_seconds_sum(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 _RE_VLLM_TTFT_SUM = re.compile(
-    r'^vllm:time_to_first_token_seconds_sum(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^vllm:time_to_first_token_seconds_sum(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 _RE_VLLM_TTFT_COUNT = re.compile(
-    r'^vllm:time_to_first_token_seconds_count(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^vllm:time_to_first_token_seconds_count(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 # Fallback patterns (older vLLM versions use underscores instead of colons)
 _RE_VLLM_GEN_ALT = re.compile(
-    r'^vllm_generation_tokens_total(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^vllm_generation_tokens_total(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 _RE_VLLM_PROMPT_ALT = re.compile(
-    r'^vllm_prompt_tokens_total(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^vllm_prompt_tokens_total(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 _RE_VLLM_REQUESTS_ALT = re.compile(
-    r'^vllm_(?:num_requests_total|request_success_total)(?:\{[^}]*\})?\s+([\d.]+)', re.M
+    r'^vllm_(?:num_requests_total|request_success_total)(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
 
 

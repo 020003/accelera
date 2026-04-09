@@ -269,14 +269,20 @@ def persist_gpu_sample(host: str, gpu_key: str, metric: str, value: float, times
 
 
 def prune_old_history():
-    """Delete samples older than retention window."""
+    """Delete samples older than retention window and reclaim disk space."""
     try:
         cutoff = time.time() - HISTORICAL_DATA_RETENTION * 3600
         db = _get_db()
-        db.execute("DELETE FROM gpu_history WHERE created_at < ?", (cutoff,))
+        cur = db.execute("DELETE FROM gpu_history WHERE created_at < ?", (cutoff,))
         db.commit()
+        deleted = cur.rowcount
+        if deleted > 0:
+            log.info("Pruned %d old gpu_history rows", deleted)
+            # Checkpoint WAL to free disk space
+            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     except Exception:
         log.debug("Failed to prune gpu_history", exc_info=True)
+        _close_db()
 
 
 def load_history_from_db(metric: str, hours: int) -> dict:
@@ -472,8 +478,12 @@ def get_token_stats(hours: int = 24) -> dict:
             bk = int(ts // bucket_sec) * bucket_sec
             if bk not in bucket_map:
                 bucket_map[bk] = {"generated": 0, "prompt": 0}
-            bucket_map[bk]["generated"] += max(gen - prev_gen, 0)
-            bucket_map[bk]["prompt"] += max(pt - prev_pt, 0)
+            # Handle Prometheus counter resets: if current < previous,
+            # the counter was restarted and the new value is the delta.
+            dg = gen - prev_gen if gen >= prev_gen else gen
+            dp = pt - prev_pt if pt >= prev_pt else pt
+            bucket_map[bk]["generated"] += dg
+            bucket_map[bk]["prompt"] += dp
             prev_gen, prev_pt = gen, pt
 
     history = []
@@ -515,14 +525,20 @@ def get_token_stats(hours: int = 24) -> dict:
 
 
 def prune_old_token_snapshots():
-    """Delete token snapshots older than retention window."""
+    """Delete token snapshots older than retention window and reclaim disk space."""
     try:
         cutoff = time.time() - HISTORICAL_DATA_RETENTION * 3600
         db = _get_db()
-        db.execute("DELETE FROM token_snapshots WHERE timestamp < ?", (cutoff,))
+        cur = db.execute("DELETE FROM token_snapshots WHERE timestamp < ?", (cutoff,))
         db.commit()
+        deleted = cur.rowcount
+        if deleted > 0:
+            log.info("Pruned %d old token_snapshots rows", deleted)
+            # Checkpoint WAL to free disk space
+            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     except Exception:
         log.debug("Failed to prune token_snapshots", exc_info=True)
+        _close_db()
 
 
 # ---------------------------------------------------------------------------

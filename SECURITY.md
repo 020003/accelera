@@ -1,6 +1,6 @@
-# Security Guide — Accelera v2.0
+# Security Guide — Accelera v2.1
 
-Last audited: **2026-03-26**
+Last audited: **2026-04-09**
 
 This document describes the security posture of the Accelera codebase, what controls are in place, known limitations, and hardening recommendations.
 
@@ -17,6 +17,7 @@ This document describes the security posture of the Accelera codebase, what cont
 | CORS | **Warning** | Defaults to `*` — restrict for production |
 | Shell commands | **Acceptable** | `run_cmd` uses `shell=True` with hardcoded commands only |
 | Rate limiting | **Missing** | No built-in rate limiting; use reverse proxy |
+| ollama-metrics proxy | **Pass** | Transparent proxy; no auth bypass; response-only parsing |
 
 ---
 
@@ -47,6 +48,13 @@ This document describes the security posture of the Accelera codebase, what cont
 - GPU exporter runs privileged (required for NVML/nvidia-smi access) with `pid: host` for process detection. This is by design and documented.
 - Frontend container runs unprivileged Node.js process.
 - No secrets baked into images.
+
+### 6. ollama-metrics Sidecar Proxy
+- Runs as a transparent proxy between clients and Ollama — no authentication bypass, no request modification (except injecting `stream_options.include_usage` for metrics collection).
+- Only parses response bodies to extract token counts; does not store, log, or forward prompt/response content.
+- The injected `stream_options.include_usage=true` is a read-only Ollama feature flag — it adds a usage summary to the SSE stream but does not alter model behavior or output.
+- No secrets, API keys, or credentials are handled by the proxy.
+- Container runs unprivileged from `scratch` (no shell, no OS packages, minimal attack surface).
 
 ---
 
