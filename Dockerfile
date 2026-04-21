@@ -11,7 +11,9 @@ RUN npm run build
 # Stage 2: Serve with nginx
 FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-RUN rm -f /etc/nginx/conf.d/default.conf.bak
+COPY nginx.conf /etc/nginx/templates/default.conf.template
+RUN rm -f /etc/nginx/conf.d/default.conf
+ENV BACKEND_URL=backend:5001
+ENV NGINX_ENVSUBST_FILTER=BACKEND_URL
 EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

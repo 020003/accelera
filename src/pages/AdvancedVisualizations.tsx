@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { proxyUrl } from "@/lib/proxy";
 import { Helmet } from "react-helmet-async";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -38,12 +38,17 @@ const HEATMAP_HOURS = [
   { label: "24h", hours: 24 },
 ] as const;
 
-function getHosts(): Host[] {
-  try {
-    return JSON.parse(localStorage.getItem("gpu_monitor_hosts") || "[]");
-  } catch {
-    return [];
-  }
+function useHosts(): Host[] {
+  const [hosts, setHosts] = useState<Host[]>([]);
+  useEffect(() => {
+    fetch("/api/hosts", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        if (Array.isArray(data)) setHosts(data);
+      })
+      .catch(() => {});
+  }, []);
+  return hosts;
 }
 
 function baseUrl(hostUrl: string): string {
@@ -60,7 +65,7 @@ function Spinner({ className = "" }: { className?: string }) {
 }
 
 export default function AdvancedVisualizations() {
-  const hosts = useMemo(getHosts, []);
+  const hosts = useHosts();
   const { theme, toggle: toggleTheme } = useTheme();
   const {
     data: topologyData,

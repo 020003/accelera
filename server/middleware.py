@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 # Rate limiter (token-bucket per IP)
 # ---------------------------------------------------------------------------
 
-_DEFAULT_RATE = 120       # requests per window
+_DEFAULT_RATE = 600       # requests per window (multiple dashboards + hooks)
 _DEFAULT_WINDOW = 60      # seconds
 _CLEANUP_INTERVAL = 300   # prune stale entries every 5 min
 

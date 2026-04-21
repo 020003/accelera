@@ -36,13 +36,8 @@ export default function Dashboard() {
   );
   const { currency, setCurrency } = useCurrency();
   const { theme, toggle: toggleTheme } = useTheme();
-  const [hosts, setHosts] = useState<Host[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem("gpu_monitor_hosts") || "[]");
-    } catch {
-      return [];
-    }
-  });
+  const [hosts, setHosts] = useState<Host[]>([]);
+  const [hostsLoaded, setHostsLoaded] = useState(false);
   const [hostsData, setHostsData] = useState<HostData[]>([]);
   const [activeTab, setActiveTab] = useState("overview");
   const { data: topologyData } = useTopology();
@@ -53,6 +48,22 @@ export default function Dashboard() {
   const [ollamaStatus, setOllamaStatus] = useState<Record<string, any>>({});
   const [sglangStatus, setSglangStatus] = useState<Record<string, any>>({});
   const [vllmStatus, setVllmStatus] = useState<Record<string, any>>({});
+
+  // Load hosts from central backend on mount
+  useEffect(() => {
+    fetch("/api/hosts", { credentials: "include" })
+      .then((res) => {
+        if (!res.ok) throw new Error(`${res.status}`);
+        return res.json();
+      })
+      .then((data: Array<{ url: string; name: string }>) => {
+        if (Array.isArray(data)) {
+          setHosts(data.map((h) => ({ url: h.url, name: h.name, isConnected: false })));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setHostsLoaded(true));
+  }, []);
   
   // Create a Map for the PowerUsageChart
   const hostDataMap = new Map(
@@ -517,8 +528,6 @@ export default function Dashboard() {
     
     if (hasChanges) {
       setHosts(updatedHosts);
-      // Also update localStorage to persist connection status
-      localStorage.setItem("gpu_monitor_hosts", JSON.stringify(updatedHosts));
     }
   };
 
@@ -559,7 +568,6 @@ export default function Dashboard() {
     localStorage.setItem("gpu_monitor_demo", enabled.toString());
     if (enabled) {
       setHosts([]);
-      localStorage.setItem("gpu_monitor_hosts", "[]");
       toast.info("Demo mode enabled");
     } else {
       toast.info("Demo mode disabled");

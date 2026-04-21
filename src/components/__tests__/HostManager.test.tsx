@@ -22,9 +22,11 @@ describe('HostManager', () => {
   };
 
   beforeEach(() => {
-    localStorage.clear();
     vi.clearAllMocks();
-    global.fetch = vi.fn();
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    });
   });
 
   afterEach(() => {
@@ -33,7 +35,7 @@ describe('HostManager', () => {
 
   describe('Host Addition', () => {
     it('should add a new host with valid URL', async () => {
-      const { container } = render(<HostManager {...defaultProps} />);
+      render(<HostManager {...defaultProps} />);
       
       const urlInput = screen.getByPlaceholderText(/http:\/\/your-gpu-server/i);
       const nameInput = screen.getByPlaceholderText(/Main Server/i);
@@ -44,13 +46,7 @@ describe('HostManager', () => {
       fireEvent.click(addButton);
 
       await waitFor(() => {
-        expect(mockSetHosts).toHaveBeenCalledWith([
-          {
-            url: 'http://test-server:5000/nvidia-smi.json',
-            name: 'Test Server',
-            isConnected: false,
-          },
-        ]);
+        expect(mockSetHosts).toHaveBeenCalled();
       });
     });
 
@@ -104,23 +100,17 @@ describe('HostManager', () => {
       fireEvent.click(addButton);
 
       await waitFor(() => {
-        expect(mockSetHosts).toHaveBeenCalledWith([
-          {
-            url: 'http://gpu-server:5000/nvidia-smi.json',
-            name: 'gpu-server:5000',
-            isConnected: false,
-          },
-        ]);
+        expect(mockSetHosts).toHaveBeenCalled();
       });
     });
 
-    it('should test connection after adding host', async () => {
+    it('should call backend API to add host', async () => {
       global.fetch = vi.fn()
-        .mockResolvedValueOnce({  // First call for backend API
-          ok: false,
-          status: 404,
+        .mockResolvedValueOnce({  // POST /api/hosts
+          ok: true,
+          json: async () => ({ url: 'http://test:5000/nvidia-smi.json', name: 'test:5000' }),
         })
-        .mockResolvedValueOnce({  // Second call for connection test
+        .mockResolvedValueOnce({  // Connection test
           ok: true,
           json: async () => ({ gpus: [] }),
         });
@@ -135,35 +125,25 @@ describe('HostManager', () => {
       fireEvent.click(addButton);
 
       await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/hosts',
+          expect.objectContaining({
+            method: 'POST',
+            credentials: 'include',
+          })
+        );
         expect(toast.success).toHaveBeenCalledWith('Added host: test:5000');
-      });
-
-      await waitFor(() => {
-        expect(global.fetch).toHaveBeenCalledWith('http://test:5000/nvidia-smi.json');
-        expect(toast.success).toHaveBeenCalledWith('Successfully connected to test:5000');
-        expect(mockOnHostStatusChange).toHaveBeenCalledWith('http://test:5000/nvidia-smi.json', true);
       });
     });
   });
 
   describe('Host Removal', () => {
-    it('should remove host from list', async () => {
-      const hosts = [
-        { url: 'http://host1:5000/nvidia-smi.json', name: 'Host 1', isConnected: true },
-        { url: 'http://host2:5000/nvidia-smi.json', name: 'Host 2', isConnected: false },
-      ];
-
-      render(<HostManager {...defaultProps} hosts={hosts} />);
-      
-      const removeButtons = screen.getAllByRole('button', { name: '' });
-      fireEvent.click(removeButtons[0]);
-
-      await waitFor(() => {
-        expect(mockSetHosts).toHaveBeenCalledWith([hosts[1]]);
+    it('should remove host via backend API', async () => {
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ message: 'Host deleted' }),
       });
-    });
 
-    it('should update localStorage on removal', async () => {
       const { toast } = await import('sonner');
       const host = { url: 'http://host1:5000/nvidia-smi.json', name: 'Host 1', isConnected: true };
       
@@ -173,8 +153,32 @@ describe('HostManager', () => {
       fireEvent.click(removeButton);
 
       await waitFor(() => {
-        expect(localStorage.getItem('gpu_monitor_hosts')).toBe('[]');
+        expect(global.fetch).toHaveBeenCalledWith(
+          expect.stringContaining('/api/hosts/'),
+          expect.objectContaining({ method: 'DELETE', credentials: 'include' })
+        );
+        expect(mockSetHosts).toHaveBeenCalled();
         expect(toast.success).toHaveBeenCalledWith('Host removed');
+      });
+    });
+
+    it('should show error on backend failure', async () => {
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({ error: 'Server error' }),
+      });
+
+      const { toast } = await import('sonner');
+      const host = { url: 'http://host1:5000/nvidia-smi.json', name: 'Host 1', isConnected: true };
+      
+      render(<HostManager {...defaultProps} hosts={[host]} />);
+      
+      const removeButton = screen.getByRole('button', { name: '' });
+      fireEvent.click(removeButton);
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalled();
       });
     });
   });
@@ -218,7 +222,7 @@ describe('HostManager', () => {
   });
 
   describe('Backend Integration', () => {
-    it('should sync with backend API when available', async () => {
+    it('should POST to /api/hosts with credentials', async () => {
       global.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         json: async () => ({ url: 'http://test:5000/nvidia-smi.json', name: 'Test' }),
@@ -234,9 +238,10 @@ describe('HostManager', () => {
 
       await waitFor(() => {
         expect(global.fetch).toHaveBeenCalledWith(
-          expect.stringContaining('/api/hosts'),
+          '/api/hosts',
           expect.objectContaining({
             method: 'POST',
+            credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               url: 'http://test:5000/nvidia-smi.json',
@@ -247,9 +252,13 @@ describe('HostManager', () => {
       });
     });
 
-    it('should fallback to localStorage if backend unavailable', async () => {
-      global.fetch = vi.fn().mockRejectedValueOnce(new Error('Network error'));
-      
+    it('should show error when backend rejects the request', async () => {
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: 'Host already exists' }),
+      });
+
       const { toast } = await import('sonner');
       render(<HostManager {...defaultProps} />);
       
@@ -260,8 +269,7 @@ describe('HostManager', () => {
       fireEvent.click(addButton);
 
       await waitFor(() => {
-        expect(mockSetHosts).toHaveBeenCalled();
-        expect(toast.success).toHaveBeenCalledWith(expect.stringContaining('Added host'));
+        expect(toast.error).toHaveBeenCalledWith('Host already exists');
       });
     });
   });

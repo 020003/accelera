@@ -5,11 +5,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        VITE_API_URL: ${VITE_API_URL:-}
-        VITE_BACKEND_HOSTS: ${VITE_BACKEND_HOSTS:-}
     ports:
       - "8080:8080"
+    environment:
+      - BACKEND_URL=backend:5001
+    depends_on:
+      backend:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
@@ -17,3 +19,23 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+  backend:
+    build:
+      context: ./server/central
+    restart: unless-stopped
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-}
+      - SESSION_LIFETIME_HOURS=${SESSION_LIFETIME_HOURS:-24}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - central-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  central-data:

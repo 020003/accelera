@@ -207,79 +207,97 @@ export function SettingsTab({
 }
 
 function DashboardAccessCard() {
-  const { authEnabled, logout, setPassword, clearPassword } = useAuth();
+  const { username, logout } = useAuth();
+  const [currentPass, setCurrentPass] = useState("");
   const [newPass, setNewPass] = useState("");
   const [confirmPass, setConfirmPass] = useState("");
   const [showPass, setShowPass] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const handleSetPassword = async () => {
-    if (!newPass || newPass !== confirmPass) {
-      toast.error("Passwords do not match");
+  const handleChangePassword = async () => {
+    if (!currentPass) {
+      toast.error("Enter your current password");
       return;
     }
-    await setPassword(newPass);
-    setNewPass("");
-    setConfirmPass("");
-    setShowPass(false);
-    toast.success(authEnabled ? "Password updated" : "Dashboard password set");
-  };
-
-  const handleRemovePassword = () => {
-    clearPassword();
-    toast.success("Password removed — dashboard is now open");
+    if (!newPass || newPass !== confirmPass) {
+      toast.error("New passwords do not match");
+      return;
+    }
+    if (newPass.length < 6) {
+      toast.error("Password must be at least 6 characters");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/auth/password", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ currentPassword: currentPass, newPassword: newPass }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success("Password updated");
+        setCurrentPass("");
+        setNewPass("");
+        setConfirmPass("");
+        setShowPass(false);
+      } else {
+        toast.error(data.error || "Failed to update password");
+      }
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <Card>
       <CardContent className="pt-6 space-y-4">
-        {/* Status row */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm">
-            {authEnabled ? (
-              <>
-                <div className="h-2 w-2 rounded-full bg-green-500" />
-                <span className="font-medium">Password protection is active</span>
-              </>
-            ) : (
-              <>
-                <div className="h-2 w-2 rounded-full bg-yellow-500" />
-                <span className="font-medium text-muted-foreground">No password set — dashboard is open to anyone with the URL</span>
-              </>
-            )}
+            <div className="h-2 w-2 rounded-full bg-green-500" />
+            <span className="font-medium">Signed in as <span className="font-mono">{username}</span></span>
           </div>
-          {authEnabled && (
-            <Button variant="outline" size="sm" onClick={logout} className="gap-1.5 h-7 text-xs">
-              <LogOut className="h-3 w-3" />
-              Sign Out
-            </Button>
-          )}
+          <Button variant="outline" size="sm" onClick={logout} className="gap-1.5 h-7 text-xs cursor-pointer">
+            <LogOut className="h-3 w-3" />
+            Sign Out
+          </Button>
         </div>
 
-        {/* Password form */}
-        <div className="grid gap-3 md:grid-cols-2 items-end">
+        <div className="grid gap-3 md:grid-cols-3 items-end">
           <div className="space-y-1.5">
-            <Label className="text-sm font-medium">
-              {authEnabled ? "New Password" : "Password"}
-            </Label>
+            <Label className="text-sm font-medium">Current Password</Label>
+            <Input
+              type={showPass ? "text" : "password"}
+              value={currentPass}
+              onChange={(e) => setCurrentPass(e.target.value)}
+              placeholder="Current password"
+              className="h-9"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-sm font-medium">New Password</Label>
             <div className="relative">
               <Input
                 type={showPass ? "text" : "password"}
                 value={newPass}
                 onChange={(e) => setNewPass(e.target.value)}
-                placeholder={authEnabled ? "Enter new password" : "Choose a password"}
+                placeholder="Enter new password"
                 className="h-9 pr-9"
               />
               <button
                 type="button"
                 onClick={() => setShowPass(!showPass)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
               >
                 {showPass ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label className="text-sm font-medium">Confirm Password</Label>
+            <Label className="text-sm font-medium">Confirm New Password</Label>
             <Input
               type={showPass ? "text" : "password"}
               value={confirmPass}
@@ -289,20 +307,14 @@ function DashboardAccessCard() {
             />
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            onClick={handleSetPassword}
-            disabled={!newPass || !confirmPass}
-          >
-            {authEnabled ? "Update Password" : "Set Password"}
-          </Button>
-          {authEnabled && (
-            <Button variant="ghost" size="sm" onClick={handleRemovePassword} className="text-destructive hover:text-destructive">
-              Remove Password
-            </Button>
-          )}
-        </div>
+        <Button
+          size="sm"
+          onClick={handleChangePassword}
+          disabled={!currentPass || !newPass || !confirmPass || saving}
+          className="cursor-pointer"
+        >
+          Change Password
+        </Button>
       </CardContent>
     </Card>
   );

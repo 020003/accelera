@@ -22,7 +22,8 @@ const Loading = () => (
 );
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
+  if (loading) return <Loading />;
   if (!isAuthenticated) return <Login />;
   return <>{children}</>;
 }

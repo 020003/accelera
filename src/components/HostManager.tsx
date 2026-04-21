@@ -57,36 +57,20 @@ export function HostManager({ hosts, setHosts, onHostStatusChange, hostsAiInfo }
     setIsAdding(true);
 
     try {
-      // Try to add to backend first if available
-      const apiUrl = import.meta.env.VITE_API_URL || window.location.origin;
-      try {
-        const response = await fetch(proxyUrl(`${apiUrl}/api/hosts`), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ url, name })
-        });
-        
-        if (!response.ok && response.status !== 404) {
-          // Backend exists but returned an error
-          const error = await response.json();
-          throw new Error(error.error || 'Failed to add host to backend');
-        }
-      } catch (backendError) {
-        // Backend might not be available, continue with local storage only
-        console.log('Backend host management not available, using local storage only');
+      const response = await fetch("/api/hosts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ url, name }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || `Failed to add host (${response.status})`);
       }
 
-      const newHost: Host = {
-        url,
-        name,
-        isConnected: false
-      };
-
-      const updatedHosts = [...hosts, newHost];
-      setHosts(updatedHosts);
-      localStorage.setItem("gpu_monitor_hosts", JSON.stringify(updatedHosts));
+      const newHost: Host = { url, name, isConnected: false };
+      setHosts((prev) => [...prev, newHost]);
       
       setNewHostUrl("");
       setNewHostName("");
@@ -106,27 +90,18 @@ export function HostManager({ hosts, setHosts, onHostStatusChange, hostsAiInfo }
     setRemovingHost(url);
 
     try {
-      // Try to remove from backend first if available
-      const apiUrl = import.meta.env.VITE_API_URL || window.location.origin;
-      try {
-        const encodedUrl = encodeURIComponent(url);
-        const response = await fetch(proxyUrl(`${apiUrl}/api/hosts/${encodedUrl}`), {
-          method: 'DELETE',
-        });
-        
-        if (!response.ok && response.status !== 404) {
-          // Backend exists but returned an error
-          const error = await response.json();
-          throw new Error(error.error || 'Failed to remove host from backend');
-        }
-      } catch (backendError) {
-        // Backend might not be available, continue with local storage only
-        console.log('Backend host management not available, using local storage only');
+      const encodedUrl = encodeURIComponent(url);
+      const response = await fetch(`/api/hosts/${encodedUrl}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      if (!response.ok && response.status !== 404) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || `Failed to remove host (${response.status})`);
       }
 
-      const updatedHosts = hosts.filter(host => host.url !== url);
-      setHosts(updatedHosts);
-      localStorage.setItem("gpu_monitor_hosts", JSON.stringify(updatedHosts));
+      setHosts((prev) => prev.filter((host) => host.url !== url));
       toast.success("Host removed");
     } catch (error) {
       console.error("Error removing host:", error);
