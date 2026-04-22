@@ -2,6 +2,7 @@
 
 import os
 import secrets
+import stat
 
 DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -16,14 +17,14 @@ def _get_secret_key() -> str:
     if os.path.isfile(key_path):
         return open(key_path).read().strip()
     key = secrets.token_hex(32)
-    with open(key_path, "w") as f:
+    fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
+    with os.fdopen(fd, "w") as f:
         f.write(key)
     return key
 
 
 SECRET_KEY = _get_secret_key()
 SESSION_LIFETIME_HOURS = int(os.environ.get("SESSION_LIFETIME_HOURS", "24"))
-CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*")
 HOST = os.environ.get("FLASK_HOST", "0.0.0.0")
 PORT = int(os.environ.get("FLASK_PORT", "5001"))
 DEBUG = os.environ.get("FLASK_DEBUG", "false").lower() == "true"

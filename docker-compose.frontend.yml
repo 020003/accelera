@@ -9,6 +9,7 @@ services:
       - "8080:8080"
     environment:
       - BACKEND_URL=backend:5001
+      - ALLOWED_PROXY_RANGE=${ALLOWED_PROXY_RANGE:-10\.}
     depends_on:
       backend:
         condition: service_healthy

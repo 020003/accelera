@@ -49,6 +49,9 @@ logs/
 *.sqlite
 *.sqlite3
 
+# Secret key files
+.secret_key
+
 # Local deployment and configuration files with IPs
 DEPLOYMENT_STATUS.md
 add_hosts.sh

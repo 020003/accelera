@@ -93,8 +93,15 @@ def login():
         return jsonify({"error": "Username and password required"}), 400
 
     user = storage.get_user(username)
+    ip = request.headers.get("X-Real-IP") or request.remote_addr or "unknown"
+
     if not user or not verify_password(password, user["password_hash"]):
+        from middleware import record_login_failure
+        record_login_failure(ip)
         return jsonify({"error": "Invalid credentials"}), 401
+
+    from middleware import clear_login_failures
+    clear_login_failures(ip)
 
     session["user"] = user["username"]
     session["role"] = user["role"]

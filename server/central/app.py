@@ -5,13 +5,13 @@ talks to this service; GPU exporters remain lightweight data agents.
 """
 
 import logging
+import os
 import sys
 from datetime import timedelta
 
 from flask import Flask
-from flask_cors import CORS
 
-from config import CORS_ORIGINS, HOST, PORT, DEBUG, LOG_LEVEL, SECRET_KEY, SESSION_LIFETIME_HOURS
+from config import HOST, PORT, DEBUG, LOG_LEVEL, SECRET_KEY, SESSION_LIFETIME_HOURS
 import storage
 
 # -------------------------------------------------------------------
@@ -33,12 +33,11 @@ app.secret_key = SECRET_KEY
 app.permanent_session_lifetime = timedelta(hours=SESSION_LIFETIME_HOURS)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = False  # Set True when using HTTPS
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true"
 
-if CORS_ORIGINS == "*":
-    CORS(app, origins="*", supports_credentials=True)
-else:
-    CORS(app, origins=CORS_ORIGINS.split(","), supports_credentials=True)
+# Middleware: rate limiting & login lockout
+from middleware import register_middleware
+register_middleware(app)
 
 # Init DB
 storage.init_db()
@@ -61,7 +60,7 @@ def health():
 @app.errorhandler(400)
 def _bad_request(e):
     from flask import jsonify
-    return jsonify({"error": str(e)}), 400
+    return jsonify({"error": "Bad request"}), 400
 
 
 @app.errorhandler(404)

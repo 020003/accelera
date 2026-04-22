@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 5001
 
-CMD ["gunicorn", "-b", "0.0.0.0:5001", "-w", "2", "--timeout", "30", "app:app"]
+CMD ["gunicorn", "-b", "0.0.0.0:5001", "-w", "1", "--threads", "4", "--timeout", "30", "app:app"]
