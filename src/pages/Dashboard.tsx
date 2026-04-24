@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNvidiaSmi } from "@/hooks/useNvidiaSmi";
 import { useTopology } from "@/hooks/useTopology";
@@ -531,9 +531,22 @@ export default function Dashboard() {
     }
   };
 
+  // Stable key: only changes when the set of host URLs changes, NOT on
+  // isConnected flips. This prevents the infinite re-fetch loop where
+  // connection-status changes re-trigger the effect immediately.
+  const hostsKey = useMemo(
+    () => hosts.map((h) => h.url).sort().join(","),
+    [hosts]
+  );
+
+  // Keep a ref to the latest hosts so the interval callback always
+  // sees the current list without being a dependency itself.
+  const hostsRef = useRef(hosts);
+  hostsRef.current = hosts;
+
   // Auto-refresh data
   useEffect(() => {
-    if (demo || hosts.length > 0) {
+    if (demo || hostsKey.length > 0) {
       fetchAllHostsData();
       
       if (refreshInterval > 0) {
@@ -541,7 +554,7 @@ export default function Dashboard() {
         return () => clearInterval(interval);
       }
     }
-  }, [hosts, demo, refreshInterval, demoData]);
+  }, [hostsKey, demo, refreshInterval, demoData]);
 
   // Lazy load advanced visualization data when needed
   useEffect(() => {
