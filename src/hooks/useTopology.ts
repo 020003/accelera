@@ -52,15 +52,24 @@ export function useTopology() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Get backend hosts from environment or use defaults
-  const backendHosts = import.meta.env.VITE_BACKEND_HOSTS?.split(',').filter(Boolean) || [
-    window.location.protocol + '//' + window.location.hostname + ':5000'
-  ];
-
   const fetchTopology = async () => {
     try {
       setLoading(true);
       setError(null);
+
+      // Fetch the host list from the central backend, then derive each
+      // GPU exporter base URL by stripping the /nvidia-smi.json suffix.
+      const hostsResp = await fetch('/api/hosts', { credentials: 'include' });
+      if (!hostsResp.ok) throw new Error(`Failed to load hosts: ${hostsResp.status}`);
+      const hostsList: Array<{ url: string; name?: string }> = await hostsResp.json();
+      const backendHosts: string[] = (Array.isArray(hostsList) ? hostsList : [])
+        .map((h) => (h.url || '').replace(/\/nvidia-smi\.json$/, ''))
+        .filter(Boolean);
+
+      if (backendHosts.length === 0) {
+        setData({ gpus: [], hosts: new Map(), mellanoxFabric: false });
+        return;
+      }
 
       // Fetch topology from all hosts in parallel
       const promises = backendHosts.map(async (host) => {

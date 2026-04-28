@@ -431,8 +431,15 @@ export default function Dashboard() {
     }
   };
 
+  // Guard against concurrent fetches — if a cycle is still in-flight,
+  // skip the next tick rather than piling up parallel requests.
+  const fetchInProgress = useRef(false);
+
   // Fetch data from all hosts
   const fetchAllHostsData = async () => {
+    if (fetchInProgress.current) return;
+    fetchInProgress.current = true;
+    try {
     if (demo) {
       // Demo mode - use demo data for overview
       const demoParsed = demoData as NvidiaSmiResponse | undefined;
@@ -512,22 +519,11 @@ export default function Dashboard() {
       return hasChanges ? filteredData : prevData;
     });
     
-    // Don't fetch advanced visualization data on initial load - load lazily when tab is accessed
-    
-    // Update host connection status without overwriting hosts state
-    // This prevents the glitch where newly added hosts disappear
-    const updatedHosts = hosts.map(host => {
-      const result = results.find(r => r.url === host.url);
-      return { ...host, isConnected: result?.isConnected || false };
-    });
-    
-    // Only update hosts if the connection status actually changed
-    const hasChanges = updatedHosts.some((updatedHost, index) => 
-      hosts[index].isConnected !== updatedHost.isConnected
-    );
-    
-    if (hasChanges) {
-      setHosts(updatedHosts);
+    // Connection status is derived from hostsData — no need to mirror
+    // it back into the hosts array (which would trigger re-renders and
+    // potentially re-fire the polling effect).
+    } finally {
+      fetchInProgress.current = false;
     }
   };
 
@@ -539,22 +535,23 @@ export default function Dashboard() {
     [hosts]
   );
 
-  // Keep a ref to the latest hosts so the interval callback always
-  // sees the current list without being a dependency itself.
-  const hostsRef = useRef(hosts);
-  hostsRef.current = hosts;
+  // Keep a ref to the fetch function so the interval always calls the
+  // latest closure without the effect needing to depend on every piece
+  // of state that fetchAllHostsData reads.
+  const fetchRef = useRef(fetchAllHostsData);
+  fetchRef.current = fetchAllHostsData;
 
   // Auto-refresh data
   useEffect(() => {
     if (demo || hostsKey.length > 0) {
-      fetchAllHostsData();
+      fetchRef.current();
       
       if (refreshInterval > 0) {
-        const interval = setInterval(fetchAllHostsData, refreshInterval);
+        const interval = setInterval(() => fetchRef.current(), refreshInterval);
         return () => clearInterval(interval);
       }
     }
-  }, [hostsKey, demo, refreshInterval, demoData]);
+  }, [hostsKey, demo, refreshInterval]);
 
   // Lazy load advanced visualization data when needed
   useEffect(() => {
