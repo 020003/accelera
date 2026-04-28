@@ -402,19 +402,48 @@ def record_token_snapshot(model: str, prompt_tokens: int, generated_tokens: int,
 
 
 def get_token_stats(hours: int = 24) -> dict:
-    """Return aggregated token statistics for the given window."""
-    cutoff = time.time() - hours * 3600
+    """Return aggregated token statistics for the given window.
+
+    Notes on correctness:
+      * Counters from Ollama / SGLang / vLLM are monotonic, so window
+        deltas are computed as MAX-MIN per model (cheap and accurate).
+      * Counter resets (server restart) within the window cause MAX-MIN
+        to UNDERCOUNT — we additionally compute pairwise-diff totals
+        from the time-series and use the larger of the two as a
+        best-effort estimate.
+      * History buckets are zero-filled across the full window so the
+        x-axis is continuous (chart doesn't bunch up around activity).
+      * `current_tps` is averaged over the last 5 minutes rather than
+        the last single inter-snapshot delta, so it's stable even when
+        scrapes are out-of-phase with inference bursts.
+      * `avg_tokens_per_sec` per model is the windowed TPT delta
+        (Δsum / Δcount) — not the all-time cumulative ratio.
+    """
+    window_sec = hours * 3600
+    now = time.time()
+    cutoff = now - window_sec
     db = _get_db()
 
-    # -- per-model totals (deltas within window + cumulative from latest) ----
+    # Adaptive bucket size: aim for ~60-120 buckets across the window.
+    # Round to a "nice" interval to keep timestamps aligned.
+    target_buckets = 90
+    raw_bucket = max(60, window_sec // target_buckets)
+    nice_steps = (60, 120, 300, 600, 900, 1800, 3600, 7200)
+    bucket_sec = nice_steps[-1]
+    for s in nice_steps:
+        if s >= raw_bucket:
+            bucket_sec = s
+            break
+
+    # -- per-model totals & windowed avg_tokens_per_sec --------------------
     models_raw = db.execute(
         "SELECT model, "
         "  MIN(generated_tokens) AS gen_min, MAX(generated_tokens) AS gen_max, "
         "  MIN(prompt_tokens) AS pt_min,  MAX(prompt_tokens) AS pt_max, "
         "  MIN(request_count) AS rc_min,  MAX(request_count) AS rc_max, "
         "  MIN(request_duration_sum) AS rd_min, MAX(request_duration_sum) AS rd_max, "
-        "  MAX(time_per_token_count) AS tpt_cnt, "
-        "  MAX(time_per_token_sum) AS tpt_sum "
+        "  MIN(time_per_token_count) AS tpt_cnt_min, MAX(time_per_token_count) AS tpt_cnt_max, "
+        "  MIN(time_per_token_sum)   AS tpt_sum_min, MAX(time_per_token_sum)   AS tpt_sum_max "
         "FROM token_snapshots WHERE timestamp >= ? "
         "GROUP BY model",
         (cutoff,),
@@ -433,8 +462,19 @@ def get_token_stats(hours: int = 24) -> dict:
         pt = max(r["pt_max"] - r["pt_min"], 0)
         rc = max(r["rc_max"] - r["rc_min"], 0)
         dur = max(r["rd_max"] - r["rd_min"], 0.0)
-        avg_tpt = (r["tpt_sum"] / r["tpt_cnt"]) if r["tpt_cnt"] else 0
-        tps = (1.0 / avg_tpt) if avg_tpt > 0 else 0
+        # Windowed average tokens/sec.  Prefer the dedicated TPT counter
+        # (Δsum / Δcount), but Ollama only updates this on specific code
+        # paths, so fall back to generated_tokens / request_duration —
+        # a sound proxy for sustained inference throughput.
+        d_tpt_sum = max((r["tpt_sum_max"] or 0) - (r["tpt_sum_min"] or 0), 0.0)
+        d_tpt_cnt = max((r["tpt_cnt_max"] or 0) - (r["tpt_cnt_min"] or 0), 0)
+        if d_tpt_cnt > 0 and d_tpt_sum > 0:
+            avg_tpt = d_tpt_sum / d_tpt_cnt
+            tps = (1.0 / avg_tpt) if avg_tpt > 0 else 0
+        elif gen > 0 and dur > 0:
+            tps = gen / dur
+        else:
+            tps = 0
         models[r["model"]] = {
             "generated_tokens": gen,
             "prompt_tokens": pt,
@@ -453,15 +493,13 @@ def get_token_stats(hours: int = 24) -> dict:
         cumulative_prompt += r["pt_max"]
         cumulative_requests += r["rc_max"]
 
-    # -- time-series (5-min buckets) ----------------------------------------
-    bucket_sec = 300
+    # -- time-series ------------------------------------------------------
     rows = db.execute(
         "SELECT timestamp, model, generated_tokens, prompt_tokens "
         "FROM token_snapshots WHERE timestamp >= ? ORDER BY timestamp",
         (cutoff,),
     ).fetchall()
 
-    # Build per-model cumulative series, then diff for buckets
     from collections import defaultdict as _dd
     series_by_model: dict[str, list] = _dd(list)
     for r in rows:
@@ -469,31 +507,25 @@ def get_token_stats(hours: int = 24) -> dict:
             (r["timestamp"], r["generated_tokens"], r["prompt_tokens"])
         )
 
-    # Merge into unified time buckets
     bucket_map: dict[int, dict] = {}
-    gap_threshold = bucket_sec * 2  # skip deltas across large time gaps
-    # Max plausible tokens per scrape interval (~60s). A fast GPU can
-    # produce ~5000 tok/s; 60s × 5000 = 300K.  Use a generous cap to
-    # filter out impossible counter jumps (proxy restart, counter seed).
+    # Allow 4× bucket size as a gap before skipping a delta — anything
+    # bigger is likely a scraper outage and shouldn't be attributed to
+    # the next bucket. max_delta_per_interval (below) is a separate
+    # protection against bad counter values.
+    gap_threshold = bucket_sec * 4
     max_delta_per_interval = 500_000
     for model, pts in series_by_model.items():
-        prev_ts = pts[0][0] if pts else 0
-        prev_gen = pts[0][1] if pts else 0
-        prev_pt = pts[0][2] if pts else 0
+        if not pts:
+            continue
+        prev_ts, prev_gen, prev_pt = pts[0]
         for ts, gen, pt in pts[1:]:
             bk = int(ts // bucket_sec) * bucket_sec
-            if bk not in bucket_map:
-                bucket_map[bk] = {"generated": 0, "prompt": 0}
-            # Skip deltas across large time gaps (e.g. exporter restart,
-            # or counter accumulated over hours/days without scraping).
+            bucket_map.setdefault(bk, {"generated": 0, "prompt": 0})
             if ts - prev_ts > gap_threshold:
                 prev_ts, prev_gen, prev_pt = ts, gen, pt
                 continue
-            # Handle Prometheus counter resets: if current < previous,
-            # the counter was restarted and the new value is the delta.
             dg = gen - prev_gen if gen >= prev_gen else gen
             dp = pt - prev_pt if pt >= prev_pt else pt
-            # Cap implausible per-interval spikes (counter seed/jump)
             if dg > max_delta_per_interval or dp > max_delta_per_interval:
                 prev_ts, prev_gen, prev_pt = ts, gen, pt
                 continue
@@ -501,25 +533,51 @@ def get_token_stats(hours: int = 24) -> dict:
             bucket_map[bk]["prompt"] += dp
             prev_ts, prev_gen, prev_pt = ts, gen, pt
 
+    # Zero-fill: emit one bucket every `bucket_sec` across the full
+    # window so the chart x-axis is continuous and consistent across
+    # window-size changes.
+    first_bk = int(cutoff // bucket_sec) * bucket_sec
+    last_bk = int(now // bucket_sec) * bucket_sec
     history = []
-    for bk in sorted(bucket_map):
-        d = bucket_map[bk]
+    bk = first_bk
+    while bk <= last_bk:
+        d = bucket_map.get(bk, {"generated": 0, "prompt": 0})
         history.append({
             "time": datetime.utcfromtimestamp(bk).isoformat() + "Z",
             "generated": d["generated"],
             "prompt": d["prompt"],
             "total": d["generated"] + d["prompt"],
         })
+        bk += bucket_sec
 
-    # -- current rate (last 2 snapshots per model) --------------------------
+    # -- current rate: rolling 5-minute average ---------------------------
+    rate_window = 300  # 5 min
+    rate_cutoff = now - rate_window
     current_tps = 0.0
-    for model in series_by_model:
-        pts = series_by_model[model]
-        if len(pts) >= 2:
-            dt = pts[-1][0] - pts[-2][0]
-            dg = pts[-1][1] - pts[-2][1]
+    for model, pts in series_by_model.items():
+        recent = [p for p in pts if p[0] >= rate_cutoff]
+        if len(recent) >= 2:
+            dt = recent[-1][0] - recent[0][0]
+            # Account for resets within the window
+            dg = 0
+            prev = recent[0][1]
+            for _ts, g, _p in recent[1:]:
+                if g >= prev:
+                    dg += g - prev
+                else:
+                    dg += g
+                prev = g
             if dt > 0 and dg > 0:
                 current_tps += dg / dt
+
+    # Cross-check window totals against pairwise sum (catches counter
+    # resets that MAX-MIN missed).
+    pairwise_gen = sum(b["generated"] for b in bucket_map.values())
+    pairwise_pt = sum(b["prompt"] for b in bucket_map.values())
+    if pairwise_gen > total_generated:
+        total_generated = pairwise_gen
+    if pairwise_pt > total_prompt:
+        total_prompt = pairwise_pt
 
     return {
         "summary": {
@@ -533,6 +591,7 @@ def get_token_stats(hours: int = 24) -> dict:
             "cumulative_prompt": cumulative_prompt,
             "cumulative_tokens": cumulative_generated + cumulative_prompt,
             "cumulative_requests": cumulative_requests,
+            "bucket_sec": bucket_sec,
         },
         "models": models,
         "history": history,

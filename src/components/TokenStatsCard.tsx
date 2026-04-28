@@ -58,8 +58,8 @@ export function TokenStatsCard({ stats, isLoading, hours = 24 }: TokenStatsCardP
     },
     {
       label: "Current Rate",
-      value: summary.current_tps > 0 ? `${summary.current_tps}` : "—",
-      sub: "tokens / sec",
+      value: `${summary.current_tps.toFixed(1)}`,
+      sub: "tok/s · 5-min avg",
       icon: Zap,
       color: "text-amber-500",
       bg: "bg-amber-500/10",

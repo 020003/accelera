@@ -31,6 +31,7 @@ export interface TokenStats {
     cumulative_prompt: number;
     cumulative_tokens: number;
     cumulative_requests: number;
+    bucket_sec?: number;
   };
   models: Record<string, TokenModelStats>;
   history: TokenHistoryPoint[];
