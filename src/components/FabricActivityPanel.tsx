@@ -52,25 +52,31 @@ function SplitBar({ tx, rx, line }: { tx: number; rx: number; line: number }) {
         </span>
         <div className="flex-1 h-2 rounded-full bg-muted border border-border/40 overflow-hidden">
           <div
-            className={`h-full transition-all ${hasTx ? "bg-blue-500" : ""}`}
-            style={{ width: `${utx}%` }}
+            className="h-full bg-blue-500 transition-all"
+            style={{ width: `${utx}%`, opacity: hasTx ? 1 : 0 }}
           />
         </div>
-        <span className={`font-mono tabular-nums w-[80px] text-right ${hasTx ? "text-blue-500" : "text-muted-foreground/60"}`}>
+        <span
+          className="font-mono tabular-nums w-[80px] text-right text-blue-500"
+          style={{ opacity: hasTx ? 1 : 0.5 }}
+        >
           {hasTx ? fmtBps(tx) : "0 B/s"}
         </span>
       </div>
       <div className="flex items-center gap-2 text-[11px]">
-        <span className="flex items-center gap-1 w-10 text-emerald-500 font-medium">
+        <span className="flex items-center gap-1 w-10 text-emerald font-medium">
           <ArrowDownToLine className="h-3 w-3" /> RX
         </span>
         <div className="flex-1 h-2 rounded-full bg-muted border border-border/40 overflow-hidden">
           <div
-            className={`h-full transition-all ${hasRx ? "bg-emerald-500" : ""}`}
-            style={{ width: `${urx}%` }}
+            className="h-full bg-emerald transition-all"
+            style={{ width: `${urx}%`, opacity: hasRx ? 1 : 0 }}
           />
         </div>
-        <span className={`font-mono tabular-nums w-[80px] text-right ${hasRx ? "text-emerald-500" : "text-muted-foreground/60"}`}>
+        <span
+          className="font-mono tabular-nums w-[80px] text-right text-emerald"
+          style={{ opacity: hasRx ? 1 : 0.5 }}
+        >
           {hasRx ? fmtBps(rx) : "0 B/s"}
         </span>
       </div>
@@ -117,7 +123,7 @@ function HostFabricRow({ host, result }: { host: Host; result?: FabricResult }) 
             <span className="flex items-center gap-1 text-blue-500">
               <ArrowUpFromLine className="h-3 w-3" /> {fmtBps(totalTx)}
             </span>
-            <span className="flex items-center gap-1 text-emerald-500">
+            <span className="flex items-center gap-1 text-emerald">
               <ArrowDownToLine className="h-3 w-3" /> {fmtBps(totalRx)}
             </span>
           </div>
@@ -143,7 +149,7 @@ function HostFabricRow({ host, result }: { host: Host; result?: FabricResult }) 
       {nvlBusy.map((l) => (
         <div key={`nvl-busy-${l.gpu}-${l.link}`} className="flex items-center gap-3 text-xs">
           <div className="flex items-center gap-1.5 min-w-[160px]">
-            <Cable className="h-3.5 w-3.5 text-emerald-500" />
+            <Cable className="h-3.5 w-3.5 text-emerald" />
             <span className="font-mono">GPU{l.gpu}·link{l.link}</span>
             <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4">NVLink</Badge>
           </div>
@@ -165,7 +171,7 @@ function HostFabricRow({ host, result }: { host: Host; result?: FabricResult }) 
           ))}
           {nvlIdleActive.map((l) => (
             <span key={`nvl-idle-${l.gpu}-${l.link}`} className="inline-flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/70" />
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald/70" />
               <span className="font-mono">GPU{l.gpu}·link{l.link}</span>
               <span className="opacity-70">NVLink idle</span>
             </span>
@@ -234,7 +240,7 @@ export function FabricActivityPanel({ hosts }: Props) {
             <span className="flex items-center gap-1 text-blue-500">
               <ArrowUpFromLine className="h-3 w-3" /> {fmtBps(fleetTx)}
             </span>
-            <span className="flex items-center gap-1 text-emerald-500">
+            <span className="flex items-center gap-1 text-emerald">
               <ArrowDownToLine className="h-3 w-3" /> {fmtBps(fleetRx)}
             </span>
           </div>
