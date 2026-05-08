@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.2.0] — 2026-05-08
+
+### Added
+- **Central backend service** (`server/central/`) — dedicated Flask + Gunicorn app for server-side authentication (bcrypt + session cookies), first-run setup flow, host CRUD, and a settings key-value store, all persisted to SQLite on a Docker volume. Replaces the previous client-side localStorage auth model
+- **Nginx `/api/` envsubst template** — proxies all auth, host, and settings calls to the central backend; `depends_on: service_healthy` ensures the frontend only starts after the backend is ready
+- **First-run setup UI** — login page now supports both setup (creating the initial admin account) and sign-in flows; protected routes show a loading spinner during session checks
+- **`bucket_sec` field in `/api/tokens/stats`** — frontend can introspect the adaptive bucket size used for the chart x-axis
+
+### Changed
+- **Frontend host management** — `useAuth`, `Dashboard`, `HostManager`, `SettingsTab`, and `AdvancedVisualizations` all migrated to fetch hosts/settings from the central backend with `credentials: 'include'`
+- **GPU exporter rate limit** — increased from 60 → 600 req/60s to accommodate the new central-polling pattern
+- **Token-stats time series** — buckets are now adaptive (60s → 2h, ~90 buckets per window) and zero-filled across the full window so the chart x-axis is continuous and consistent across time-window changes
+- **`current_tps`** — now a rolling 5-minute average with counter-reset handling, instead of being computed from just the last two snapshots (which read 0 most of the time)
+- **`avg_tokens_per_sec` per model** — uses the windowed `time_per_token` delta (Δsum / Δcount) when the backend exposes it, falling back to `generated_tokens / request_duration` so it reflects the selected window rather than an all-time average
+- **vLLM throughput metric** — switched from `time_to_first_token_seconds` (per-request) to `inter_token_latency_seconds` (per-token); fixes a 50× under-reporting on the dashboard (was ~2 tok/s, actual ~100 tok/s)
+
+### Fixed
+- **Dashboard auto-refresh infinite request loop** — the polling effect depended on `hosts`, whose `isConnected` flag was rewritten on every fetch, re-triggering the effect immediately and hammering GPU exporters into rate-limit territory until the dashboard went blank. Effect now keys on a stable URL-only `hostsKey`
+- **SGLang false positive on hosts running vLLM** — `_probe_sglang` accepted any HTTP 200 on `/v1/models`, but vLLM exposes the identical OpenAI-compatible endpoint on port 8000. Probe now requires a successful response from the SGLang-specific `/get_server_info` first
+- **Topology hook stuck on obsolete env var** — `useTopology` was reading host URLs from `VITE_BACKEND_HOSTS` (no longer set post-refactor) and falling back to `window.location:5000` (the frontend host, with no GPU exporter). Now loads hosts from the central backend like the rest of the dashboard
+- **Token-stats summary undercount on counter resets** — `MAX − MIN` over a window where Ollama/vLLM restarted gave wrong totals; added a pairwise-diff cross-check that takes the larger of the two estimates
+
+### Security
+- **`flask-cors` removed entirely** — central backend is only reachable via the nginx same-origin proxy, so the previous wildcard-CORS-with-credentials configuration (which would have let any origin make authenticated API calls) is gone
+- **Rate limiting on central backend** — 120 req/60s per IP via in-process middleware
+- **Login lockout** — 5 failed attempts trigger a 30s lockout with exponential backoff (doubling up to 15 min); correct credentials are still rejected while locked
+- **Single-worker Gunicorn** (1 worker × 4 threads) — ensures the in-memory lockout and rate-limit dicts are shared across all requests
+- **SSRF default-deny on nginx proxy** — all RFC1918 ranges (10/8, 172.16/12, 192.168/16) are blocked unless explicitly whitelisted via `ALLOWED_PROXY_RANGE`
+- **Secret hygiene** — `.secret_key` is written with 0600 permissions and added to `.gitignore`; `SESSION_COOKIE_SECURE` is now configurable; the 400 handler no longer leaks exception details
+
+---
+
 ## [2.1.1] — 2026-04-09
 
 ### Fixed
