@@ -31,6 +31,23 @@ def _probe_sglang(base_url: str, timeout_s: float) -> dict | None:
     Returns a result dict on success, or ``None`` on failure.
     """
     try:
+        # Require SGLang-specific /get_server_info to disambiguate from
+        # other OpenAI-compatible servers (vLLM, llama.cpp, etc.) that
+        # expose an identical /v1/models endpoint.  vLLM returns 404
+        # here; SGLang returns its server state.
+        info_resp = http_requests.get(
+            f"{base_url}/get_server_info", timeout=timeout_s
+        )
+        if info_resp.status_code != 200:
+            return None
+        try:
+            server_info = info_resp.json()
+        except ValueError:
+            return None
+        if not isinstance(server_info, dict):
+            return None
+
+        # Now fetch the model list (still via /v1/models for consistency)
         resp = http_requests.get(f"{base_url}/v1/models", timeout=timeout_s)
         if resp.status_code != 200:
             return None
@@ -49,17 +66,6 @@ def _probe_sglang(base_url: str, timeout_s: float) -> dict | None:
             }
             for m in models_raw
         ]
-
-        # Try to get extra server info (optional, newer SGLang)
-        server_info = {}
-        try:
-            info_resp = http_requests.get(
-                f"{base_url}/get_server_info", timeout=timeout_s
-            )
-            if info_resp.status_code == 200:
-                server_info = info_resp.json()
-        except Exception:
-            pass
 
         return {
             "isAvailable": True,
