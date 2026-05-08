@@ -19,6 +19,7 @@ The first call after process start returns 0 rates (warm-up).
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -115,6 +116,57 @@ def _parse_state(raw: str) -> str:
     return raw or "UNKNOWN"
 
 
+def _ib_netdev(ib_dev: str) -> str | None:
+    """Return the Ethernet netdev backing a RoCE IB device, or None."""
+    for root in ("/host/sys", "/sys"):
+        net_dir = f"{root}/class/infiniband/{ib_dev}/device/net"
+        try:
+            entries = os.listdir(net_dir)
+            if entries:
+                return entries[0]
+        except OSError:
+            continue
+    return None
+
+
+# Vport counters (the only authoritative source for RoCE RDMA RX bytes
+# on Mellanox CX) require ethtool inside the host's network namespace.
+# Doing that needs CAP_SYS_ADMIN, which the unprivileged Flask user
+# doesn't have — so a separate root-owned poller (started by the
+# container entrypoint) periodically writes the stats to a JSON file
+# we just read here.
+
+_POLLER_PATH = os.environ.get("FABRIC_STATS_PATH", "/run/fabric/stats.json")
+_POLLER_STALE_SEC = 30.0
+
+
+def _poller_snapshot() -> dict[str, Any] | None:
+    """Read the latest fabric stats from the poller's JSON file.
+    Returns None if the file is missing, unreadable, or older than
+    _POLLER_STALE_SEC (which usually means the poller died)."""
+    try:
+        with open(_POLLER_PATH, "r") as f:
+            data = json.load(f)
+    except (FileNotFoundError, PermissionError, json.JSONDecodeError):
+        return None
+    ts = data.get("ts", 0)
+    if time.time() - ts > _POLLER_STALE_SEC:
+        return None
+    return data
+
+
+def _roce_bytes_from_poller(dev: str) -> tuple[int, int, str] | None:
+    """Return (tx_bytes, rx_bytes, iface) for an IB device from the
+    root poller's snapshot.  None if the poller hasn't seen this device."""
+    snap = _poller_snapshot()
+    if snap is None:
+        return None
+    port = snap.get("ports", {}).get(dev)
+    if not port:
+        return None
+    return port["tx_bytes"], port["rx_bytes"], port.get("iface", "")
+
+
 def _collect_infiniband(now: float) -> list[dict[str, Any]]:
     if not os.path.isdir(_IB_ROOT):
         return []
@@ -136,13 +188,32 @@ def _collect_infiniband(now: float) -> list[dict[str, Any]]:
         for p in ports:
             base = f"{ports_dir}/{p}"
             counters = f"{base}/counters"
-            tx_words = _read_int(f"{counters}/port_xmit_data")
-            rx_words = _read_int(f"{counters}/port_rcv_data")
-            if tx_words is None or rx_words is None:
-                continue
-            # IB counters are in 4-byte words
-            tx_bytes = tx_words * 4
-            rx_bytes = rx_words * 4
+            link_layer = _read_str(f"{base}/link_layer") or "Unknown"
+
+            # Counter source resolution:
+            #   - True InfiniBand: port_xmit_data / port_rcv_data (in 4-byte
+            #     words per IB spec) work correctly for both directions.
+            #   - RoCE (Ethernet link layer on Mellanox CX): port_rcv_data
+            #     does NOT include incoming RDMA writes — verified
+            #     empirically.  Fall back to ethtool vport counters which
+            #     are authoritative.
+            tx_bytes = rx_bytes = None
+            counter_source = "ib"
+            if link_layer == "Ethernet":
+                triple = _roce_bytes_from_poller(dev)
+                if triple is not None:
+                    tx_bytes, rx_bytes, iface = triple
+                    counter_source = f"vport:{iface}"
+
+            if tx_bytes is None or rx_bytes is None:
+                tx_words = _read_int(f"{counters}/port_xmit_data")
+                rx_words = _read_int(f"{counters}/port_rcv_data")
+                if tx_words is None or rx_words is None:
+                    continue
+                # IB counters are in 4-byte words
+                tx_bytes = tx_words * 4
+                rx_bytes = rx_words * 4
+
             tx_bps = _rate(f"ib:{dev}:{p}:tx", tx_bytes, now)
             rx_bps = _rate(f"ib:{dev}:{p}:rx", rx_bytes, now)
             link_downed = _read_int(f"{counters}/link_downed") or 0
@@ -157,6 +228,7 @@ def _collect_infiniband(now: float) -> list[dict[str, Any]]:
                 "rx_bytes": rx_bytes,
                 "tx_bps": tx_bps,
                 "rx_bps": rx_bps,
+                "counter_source": counter_source,
                 "errors": {
                     "link_downed": link_downed,
                     "symbol_errors": symbol_errors,

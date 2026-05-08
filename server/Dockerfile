@@ -3,7 +3,7 @@ FROM nvidia/cuda:12.3.2-base-ubuntu22.04
 # Install Python, tini (PID 1 init), and minimal tools
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3 python3-pip tini curl && \
+        python3 python3-pip tini curl ethtool && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
