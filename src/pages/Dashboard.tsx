@@ -695,6 +695,7 @@ export default function Dashboard() {
           <TabsContent value="visualizations" className="space-y-4">
             <VisualizationsTab
               topologyData={topologyData}
+              hosts={hosts}
               heatmapData={heatmapData}
               heatmapHours={heatmapHours}
               setHeatmapHours={setHeatmapHours}

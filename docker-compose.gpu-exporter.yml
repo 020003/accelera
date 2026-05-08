@@ -48,6 +48,10 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - /proc:/host/proc:ro
+      # Full host sysfs read-only — needed by the live fabric collector
+      # to follow IB device symlinks to their real /sys/devices/... paths
+      # (the container's own /sys masks the IB counters/ subtree).
+      - /sys:/host/sys:ro
       - accelera-data:/app/data
 
 volumes:

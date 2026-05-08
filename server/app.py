@@ -78,11 +78,12 @@ from blueprints.sglang import sglang_bp
 from blueprints.benchmarks import benchmarks_bp
 from blueprints.processes import processes_bp
 from blueprints.vllm import vllm_bp
+from blueprints.fabric import fabric_bp
 
 for bp in (gpu_bp, hosts_bp, ollama_bp, sglang_bp, vllm_bp, topology_bp,
            health_bp, heatmap_bp, timeline_bp, prometheus_bp, alerts_bp,
            events_bp, sse_bp, settings_bp, tokens_bp, benchmarks_bp,
-           processes_bp):
+           processes_bp, fabric_bp):
     app.register_blueprint(bp)
 
 # -------------------------------------------------------------------
