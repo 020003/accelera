@@ -370,6 +370,15 @@ _RE_VLLM_REQUESTS = re.compile(
 _RE_VLLM_E2E_SUM = re.compile(
     r'^vllm:e2e_request_latency_seconds_sum(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
+# Inter-token latency (a.k.a. TPOT): per-token timing, used to compute
+# tokens-per-second.  Falls back to TTFT only if ITL is unavailable —
+# TTFT is per-request and would give requests/sec, not tok/sec.
+_RE_VLLM_ITL_SUM = re.compile(
+    r'^vllm:inter_token_latency_seconds_sum(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
+)
+_RE_VLLM_ITL_COUNT = re.compile(
+    r'^vllm:inter_token_latency_seconds_count(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
+)
 _RE_VLLM_TTFT_SUM = re.compile(
     r'^vllm:time_to_first_token_seconds_sum(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
@@ -435,10 +444,17 @@ def _parse_vllm_metrics(text: str) -> dict | None:
     for m in _RE_VLLM_E2E_SUM.finditer(text):
         dur_sum += float(m.group(1))
 
-    for m in _RE_VLLM_TTFT_SUM.finditer(text):
+    # Prefer inter-token latency (per-token), fall back to TTFT only if
+    # ITL is missing.  TTFT is per-request and would distort tok/sec.
+    for m in _RE_VLLM_ITL_SUM.finditer(text):
         tpt_sum += float(m.group(1))
-    for m in _RE_VLLM_TTFT_COUNT.finditer(text):
+    for m in _RE_VLLM_ITL_COUNT.finditer(text):
         tpt_count += int(float(m.group(1)))
+    if tpt_count == 0:
+        for m in _RE_VLLM_TTFT_SUM.finditer(text):
+            tpt_sum += float(m.group(1))
+        for m in _RE_VLLM_TTFT_COUNT.finditer(text):
+            tpt_count += int(float(m.group(1)))
 
     return {
         "generated_tokens": gen,
