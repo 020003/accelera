@@ -36,51 +36,60 @@ function utilization(bps: number, lineGbps: number): number {
   return Math.min(1, bps / peakBps);
 }
 
-function PortBar({ tx, rx, line }: { tx: number; rx: number; line: number }) {
+/** Center-anchored dual-direction bar: TX grows leftwards from center,
+ *  RX grows rightwards.  Makes symmetric traffic visually distinct from
+ *  one-way traffic at a glance. */
+function SplitBar({ tx, rx, line }: { tx: number; rx: number; line: number }) {
   const utx = utilization(tx, line) * 100;
   const urx = utilization(rx, line) * 100;
   return (
-    <div className="space-y-1 min-w-[140px]">
-      <div className="flex items-center gap-1.5 text-[11px]">
-        <ArrowUpFromLine className="h-3 w-3 text-blue-500" />
-        <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+    <div className="flex items-center gap-2 min-w-[200px] flex-1">
+      {/* TX (left half, grows right-to-left) */}
+      <span className="font-mono tabular-nums text-[11px] w-[78px] text-right text-blue-500">
+        {fmtBps(tx)}
+      </span>
+      <div className="flex-1 flex items-center h-2 relative">
+        <div className="flex-1 h-full bg-muted/60 rounded-l-full relative overflow-hidden">
           <div
-            className="h-full bg-blue-500 transition-all"
+            className="absolute right-0 top-0 h-full bg-blue-500 transition-all"
             style={{ width: `${utx}%` }}
           />
         </div>
-        <span className="font-mono tabular-nums w-[68px] text-right text-blue-500">
-          {fmtBps(tx)}
-        </span>
-      </div>
-      <div className="flex items-center gap-1.5 text-[11px]">
-        <ArrowDownToLine className="h-3 w-3 text-emerald-500" />
-        <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+        <div className="w-px h-full bg-border" />
+        <div className="flex-1 h-full bg-muted/60 rounded-r-full relative overflow-hidden">
           <div
-            className="h-full bg-emerald-500 transition-all"
+            className="absolute left-0 top-0 h-full bg-emerald-500 transition-all"
             style={{ width: `${urx}%` }}
           />
         </div>
-        <span className="font-mono tabular-nums w-[68px] text-right text-emerald-500">
-          {fmtBps(rx)}
-        </span>
       </div>
+      <span className="font-mono tabular-nums text-[11px] w-[78px] text-emerald-500">
+        {fmtBps(rx)}
+      </span>
     </div>
   );
 }
 
+// A port is "busy" if it's currently moving > IDLE_THRESHOLD bytes/sec.
+// Below that we treat it as idle-active and render compactly.
+const IDLE_THRESHOLD = 1_000_000; // 1 MB/s
+
 function HostFabricRow({ host, result }: { host: Host; result?: FabricResult }) {
   const data = result?.data;
-  const ibActive = (data?.infiniband ?? []).filter((p) => p.state === "ACTIVE");
-  const ibIdle = (data?.infiniband ?? []).filter((p) => p.state !== "ACTIVE");
-  const nvlActive = (data?.nvlink ?? []).filter((l) => l.state === "active");
-  const totalTx = (data?.infiniband ?? []).reduce((s, p) => s + p.tx_bps, 0)
-                + (data?.nvlink ?? []).reduce((s, l) => s + l.tx_bps, 0);
-  const totalRx = (data?.infiniband ?? []).reduce((s, p) => s + p.rx_bps, 0)
-                + (data?.nvlink ?? []).reduce((s, l) => s + l.rx_bps, 0);
+  const ib = data?.infiniband ?? [];
+  const nvl = data?.nvlink ?? [];
+  const ibBusy = ib.filter((p) => p.state === "ACTIVE" && (p.tx_bps + p.rx_bps) >= IDLE_THRESHOLD);
+  const ibIdleActive = ib.filter((p) => p.state === "ACTIVE" && (p.tx_bps + p.rx_bps) < IDLE_THRESHOLD);
+  const ibDown = ib.filter((p) => p.state !== "ACTIVE");
+  const nvlBusy = nvl.filter((l) => l.state === "active" && (l.tx_bps + l.rx_bps) >= IDLE_THRESHOLD);
+  const nvlIdleActive = nvl.filter((l) => l.state === "active" && (l.tx_bps + l.rx_bps) < IDLE_THRESHOLD);
+  const totalTx = ib.reduce((s, p) => s + p.tx_bps, 0) + nvl.reduce((s, l) => s + l.tx_bps, 0);
+  const totalRx = ib.reduce((s, p) => s + p.rx_bps, 0) + nvl.reduce((s, l) => s + l.rx_bps, 0);
+  const isBusy = totalTx + totalRx >= IDLE_THRESHOLD;
 
   return (
-    <div className="rounded-lg border bg-card/40 p-3 space-y-2.5">
+    <div className={`rounded-lg border bg-card/40 p-3 space-y-2 ${isBusy ? "" : "opacity-90"}`}>
+      {/* Host header */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2 min-w-0">
           <Cpu className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -91,71 +100,80 @@ function HostFabricRow({ host, result }: { host: Host; result?: FabricResult }) 
           {!result?.isError && !data && (
             <Badge variant="secondary" className="text-[10px]">probing…</Badge>
           )}
+          {data && !isBusy && (ibBusy.length + nvlBusy.length === 0) && ib.length + nvl.length > 0 && (
+            <Badge variant="outline" className="text-[10px] opacity-60">idle</Badge>
+          )}
         </div>
-        <div className="flex items-center gap-3 text-[11px] text-muted-foreground font-mono tabular-nums">
-          <span className="flex items-center gap-1">
-            <ArrowUpFromLine className="h-3 w-3 text-blue-500" />
-            {fmtBps(totalTx)}
-          </span>
-          <span className="flex items-center gap-1">
-            <ArrowDownToLine className="h-3 w-3 text-emerald-500" />
-            {fmtBps(totalRx)}
-          </span>
-        </div>
+        {(totalTx + totalRx) > 0 && (
+          <div className="flex items-center gap-3 text-[11px] font-mono tabular-nums">
+            <span className="flex items-center gap-1 text-blue-500">
+              <ArrowUpFromLine className="h-3 w-3" /> {fmtBps(totalTx)}
+            </span>
+            <span className="flex items-center gap-1 text-emerald-500">
+              <ArrowDownToLine className="h-3 w-3" /> {fmtBps(totalRx)}
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* InfiniBand / RoCE ports */}
-      {(ibActive.length > 0 || ibIdle.length > 0) && (
-        <div className="space-y-1.5">
-          {ibActive.map((p) => (
-            <div key={`ib-${p.device}-${p.port}`} className="flex items-center gap-3 text-xs">
-              <div className="flex items-center gap-1.5 min-w-[150px]">
-                <Network className="h-3.5 w-3.5 text-amber-500" />
-                <span className="font-mono">{p.device}/{p.port}</span>
-                <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4">
-                  {p.link_layer === "Ethernet" ? "RoCE" : "IB"} · {p.rate_gbps}Gb
-                </Badge>
-              </div>
-              <div className="flex-1">
-                <PortBar tx={p.tx_bps} rx={p.rx_bps} line={p.rate_gbps} />
-              </div>
-              <div className="text-[10px] text-muted-foreground tabular-nums hidden lg:block min-w-[120px] text-right">
-                Σ {fmtBytes(p.tx_bytes)}↑ / {fmtBytes(p.rx_bytes)}↓
-              </div>
-            </div>
-          ))}
-          {ibIdle.map((p) => (
-            <div key={`ib-${p.device}-${p.port}`} className="flex items-center gap-2 text-[11px] text-muted-foreground">
-              <Network className="h-3 w-3" />
-              <span className="font-mono">{p.device}/{p.port}</span>
-              <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4 opacity-60">
-                {p.state}
-              </Badge>
-            </div>
-          ))}
+      {/* Busy ports — full split-bar visualisation */}
+      {ibBusy.map((p) => (
+        <div key={`ib-busy-${p.device}-${p.port}`} className="flex items-center gap-3 text-xs">
+          <div className="flex items-center gap-1.5 min-w-[160px]">
+            <Network className="h-3.5 w-3.5 text-amber-500" />
+            <span className="font-mono">{p.device}/{p.port}</span>
+            <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4">
+              {p.link_layer === "Ethernet" ? "RoCE" : "IB"}·{p.rate_gbps}Gb
+            </Badge>
+          </div>
+          <SplitBar tx={p.tx_bps} rx={p.rx_bps} line={p.rate_gbps} />
+          <div className="text-[10px] text-muted-foreground tabular-nums hidden xl:block min-w-[140px] text-right">
+            Σ {fmtBytes(p.tx_bytes)}↑ / {fmtBytes(p.rx_bytes)}↓
+          </div>
         </div>
-      )}
+      ))}
+      {nvlBusy.map((l) => (
+        <div key={`nvl-busy-${l.gpu}-${l.link}`} className="flex items-center gap-3 text-xs">
+          <div className="flex items-center gap-1.5 min-w-[160px]">
+            <Cable className="h-3.5 w-3.5 text-emerald-500" />
+            <span className="font-mono">GPU{l.gpu}·link{l.link}</span>
+            <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4">NVLink</Badge>
+          </div>
+          <SplitBar tx={l.tx_bps} rx={l.rx_bps} line={50} />
+        </div>
+      ))}
 
-      {/* NVLinks */}
-      {nvlActive.length > 0 && (
-        <div className="space-y-1.5">
-          {nvlActive.map((l) => (
-            <div key={`nvl-${l.gpu}-${l.link}`} className="flex items-center gap-3 text-xs">
-              <div className="flex items-center gap-1.5 min-w-[150px]">
-                <Cable className="h-3.5 w-3.5 text-emerald-500" />
-                <span className="font-mono">GPU{l.gpu} · link {l.link}</span>
-                <Badge variant="outline" className="text-[10px] py-0 px-1.5 h-4">NVLink</Badge>
-              </div>
-              <div className="flex-1">
-                <PortBar tx={l.tx_bps} rx={l.rx_bps} line={50 /* per-link assumption */} />
-              </div>
-            </div>
+      {/* Compact line for idle-active ports + DOWN ports */}
+      {(ibIdleActive.length + nvlIdleActive.length + ibDown.length) > 0 && (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground pt-0.5">
+          {ibIdleActive.map((p) => (
+            <span key={`ib-idle-${p.device}-${p.port}`} className="inline-flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500/70" />
+              <span className="font-mono">{p.device}/{p.port}</span>
+              <span className="opacity-70">
+                {p.link_layer === "Ethernet" ? "RoCE" : "IB"}·{p.rate_gbps}Gb idle
+              </span>
+            </span>
+          ))}
+          {nvlIdleActive.map((l) => (
+            <span key={`nvl-idle-${l.gpu}-${l.link}`} className="inline-flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/70" />
+              <span className="font-mono">GPU{l.gpu}·link{l.link}</span>
+              <span className="opacity-70">NVLink idle</span>
+            </span>
+          ))}
+          {ibDown.map((p) => (
+            <span key={`ib-down-${p.device}-${p.port}`} className="inline-flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />
+              <span className="font-mono opacity-70">{p.device}/{p.port}</span>
+              <span className="opacity-60">{p.state}</span>
+            </span>
           ))}
         </div>
       )}
 
       {/* Empty state */}
-      {data && ibActive.length === 0 && ibIdle.length === 0 && nvlActive.length === 0 && (
+      {data && ib.length === 0 && nvl.length === 0 && (
         <div className="text-[11px] text-muted-foreground italic">
           No high-speed fabric devices on this host.
         </div>
