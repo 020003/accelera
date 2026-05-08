@@ -36,36 +36,44 @@ function utilization(bps: number, lineGbps: number): number {
   return Math.min(1, bps / peakBps);
 }
 
-/** Center-anchored dual-direction bar: TX grows leftwards from center,
- *  RX grows rightwards.  Makes symmetric traffic visually distinct from
- *  one-way traffic at a glance. */
+/** Two clearly-stacked TX/RX bars with visible empty tracks.
+ *  An idle direction still shows its full track + label so the user
+ *  can see "this direction exists, it's just zero right now". */
 function SplitBar({ tx, rx, line }: { tx: number; rx: number; line: number }) {
   const utx = utilization(tx, line) * 100;
   const urx = utilization(rx, line) * 100;
+  const hasTx = tx > 0;
+  const hasRx = rx > 0;
   return (
-    <div className="flex items-center gap-2 min-w-[200px] flex-1">
-      {/* TX (left half, grows right-to-left) */}
-      <span className="font-mono tabular-nums text-[11px] w-[78px] text-right text-blue-500">
-        {fmtBps(tx)}
-      </span>
-      <div className="flex-1 flex items-center h-2 relative">
-        <div className="flex-1 h-full bg-muted/60 rounded-l-full relative overflow-hidden">
+    <div className="flex flex-col gap-1 min-w-[240px] flex-1">
+      <div className="flex items-center gap-2 text-[11px]">
+        <span className="flex items-center gap-1 w-10 text-blue-500 font-medium">
+          <ArrowUpFromLine className="h-3 w-3" /> TX
+        </span>
+        <div className="flex-1 h-2 rounded-full bg-muted border border-border/40 overflow-hidden">
           <div
-            className="absolute right-0 top-0 h-full bg-blue-500 transition-all"
+            className={`h-full transition-all ${hasTx ? "bg-blue-500" : ""}`}
             style={{ width: `${utx}%` }}
           />
         </div>
-        <div className="w-px h-full bg-border" />
-        <div className="flex-1 h-full bg-muted/60 rounded-r-full relative overflow-hidden">
+        <span className={`font-mono tabular-nums w-[80px] text-right ${hasTx ? "text-blue-500" : "text-muted-foreground/60"}`}>
+          {hasTx ? fmtBps(tx) : "0 B/s"}
+        </span>
+      </div>
+      <div className="flex items-center gap-2 text-[11px]">
+        <span className="flex items-center gap-1 w-10 text-emerald-500 font-medium">
+          <ArrowDownToLine className="h-3 w-3" /> RX
+        </span>
+        <div className="flex-1 h-2 rounded-full bg-muted border border-border/40 overflow-hidden">
           <div
-            className="absolute left-0 top-0 h-full bg-emerald-500 transition-all"
+            className={`h-full transition-all ${hasRx ? "bg-emerald-500" : ""}`}
             style={{ width: `${urx}%` }}
           />
         </div>
+        <span className={`font-mono tabular-nums w-[80px] text-right ${hasRx ? "text-emerald-500" : "text-muted-foreground/60"}`}>
+          {hasRx ? fmtBps(rx) : "0 B/s"}
+        </span>
       </div>
-      <span className="font-mono tabular-nums text-[11px] w-[78px] text-emerald-500">
-        {fmtBps(rx)}
-      </span>
     </div>
   );
 }
