@@ -70,6 +70,16 @@ export default function Dashboard() {
   const hostDataMap = new Map(
     hostsData.map(host => [host.url, { gpus: host.gpus, timestamp: host.timestamp }])
   );
+
+  // Live host list with up-to-date connection status.  The `hosts`
+  // state is loaded once from /api/hosts with isConnected:false and is
+  // never mutated; the actual connection status lives in `hostsData`.
+  // PowerUsageChart (and any other consumer that needs isConnected)
+  // must use this derived view, not raw `hosts`.
+  const liveHosts = hosts.map((h) => {
+    const d = hostsData.find((hd) => hd.url === h.url);
+    return { ...h, isConnected: d?.isConnected ?? false };
+  });
   
 
   // Demo mode API query
@@ -686,7 +696,7 @@ export default function Dashboard() {
               <>
                 <MultiHostOverview hostsData={hostsData} energyRate={energyRate} currencySymbol={currency.symbol} />
                 <PowerUsageChart 
-                  hosts={hosts} 
+                  hosts={liveHosts} 
                   hostData={hostDataMap} 
                   refreshInterval={refreshInterval}
                   energyRate={energyRate}
