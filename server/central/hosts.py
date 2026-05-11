@@ -19,6 +19,19 @@ def _is_valid_host_url(url: str) -> bool:
         return False
 
 
+def _restore_url(url: str) -> str:
+    """Nginx's default `merge_slashes on` collapses the `//` after the
+    scheme when the client URL-encodes the slashes (e.g. browser sends
+    ``%2F%2F`` → nginx decodes → ``//`` → merged → ``/``).  So we
+    receive ``http:/host:port/path`` instead of ``http://host:port/path``.
+    Repair the URL before we use it as a DB key."""
+    if url.startswith("http:/") and not url.startswith("http://"):
+        return "http://" + url[len("http:/"):]
+    if url.startswith("https:/") and not url.startswith("https://"):
+        return "https://" + url[len("https:/"):]
+    return url
+
+
 @hosts_bp.route("/api/hosts", methods=["GET"])
 @login_required
 def get_hosts():
@@ -55,6 +68,7 @@ def add_host():
 @login_required
 def delete_host(url):
     """Remove a host by URL."""
+    url = _restore_url(url)
     if storage.delete_host(url):
         return jsonify({"message": "Host deleted"})
     return jsonify({"error": "Host not found"}), 404
@@ -64,6 +78,7 @@ def delete_host(url):
 @login_required
 def update_host(url):
     """Update mutable fields of a host (currently: display name)."""
+    url = _restore_url(url)
     data = request.get_json() or {}
     name = (data.get("name") or "").strip()
     if not name:
