@@ -1,22 +1,29 @@
-# Security Guide — Accelera v2.1
+# Security Guide — Accelera v2.3
 
-Last audited: **2026-04-09**
+Last audited: **2026-05-11**
 
-This document describes the security posture of the Accelera codebase, what controls are in place, known limitations, and hardening recommendations.
+This document describes the security posture of the Accelera codebase, what controls are in place, known limitations, and hardening recommendations.  See [`docs/REFACTOR_BACKLOG.md`](docs/REFACTOR_BACKLOG.md) for the prioritised backlog of open items.
 
 ---
 
-## Audit Summary
+## Audit Summary (v2.3)
 
 | Area | Status | Notes |
 |---|---|---|
+| Authentication | **Pass** | bcrypt password hashes, signed session cookies (HttpOnly + SameSite=Lax), 5-failure → 30 s → 15 min exponential lockout per IP |
 | SQL injection | **Pass** | All queries use parameterized bindings (`?`) |
 | XSS | **Pass** | React auto-escapes output; no raw HTML injection |
-| SSRF | **Pass** | URL validation on `/api/hosts` and `/api/ollama/discover` |
-| Secret management | **Pass** | Auto-generated Flask secret key; secrets masked in API |
-| CORS | **Warning** | Defaults to `*` — restrict for production |
-| Shell commands | **Acceptable** | `run_cmd` uses `shell=True` with hardcoded commands only |
-| Rate limiting | **Missing** | No built-in rate limiting; use reverse proxy |
+| SSRF | **Pass** | nginx `/api-proxy/` default-denies every RFC1918 range; only port 5000 reachable; `ALLOWED_PROXY_RANGE` allowlist |
+| Cookie leakage to exporters | **Pass (v2.3)** | nginx now strips `Cookie` and `Authorization` headers before forwarding via `/api-proxy/` |
+| URL slash mangling | **Pass (v2.3)** | Backend `_restore_url()` repairs `http:/` → `http://` when nginx `merge_slashes on` collapsed the path |
+| Secret management | **Pass** | Persisted `.secret_key` with 0600 perms; secrets masked in API |
+| Rate limiting | **Pass** | 120 req/60 s central, 600 req/60 s exporter; in-process per-IP, single-worker enforcement |
+| Shell commands | **Acceptable** | `run_cmd` uses `shell=True` with hardcoded commands only — no user input |
+| CORS (central) | **Pass** | `flask-cors` removed in 2.2; only reachable via same-origin nginx |
+| CORS (exporter) | **Warning** | Defaults to `*`; exporter has no auth.  Rely on network segmentation, not CORS. |
+| Session-cookie Secure flag | **Warning** | `SESSION_COOKIE_SECURE=false` by default.  Set to `true` when serving over HTTPS. |
+| CSRF | **Warning** | No anti-CSRF token; SameSite=Lax + JSON content-type provide partial defense.  Add token-based CSRF for defense in depth. |
+| GPU-exporter auth | **Open** | Exporter trusts the network.  Documented; see backlog item S-3 for proposed mTLS / shared-secret design. |
 | ollama-metrics proxy | **Pass** | Transparent proxy; no auth bypass; response-only parsing |
 
 ---

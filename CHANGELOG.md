@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.3.0] — 2026-05-11
+
+### Added
+- **Cloud-cost equivalent tab** — new "Cost Analysis" tab calculates what your fleet's locally-generated tokens would have cost on Claude / GPT-4o / Kimi K2 / Gemini / DeepSeek / Llama / etc.  Pricing is pulled from OpenRouter's public catalog (~330 models, refreshed every 6 h, with an offline fallback list of 17 flagship models).  Filters by provider, time window (24 h / 7 d / 30 d / all-time cumulative), and free-text model search.  KPI cards for cheapest / median / most-expensive equivalent and a sortable table with `$/Mtok` rates, prompt+completion split, and a `Nx vs cheapest` bar.
+- **Live fabric activity** — NVLink + InfiniBand / RoCE telemetry overlay on the topology view.  Per-port `tx/rx` rates with two clearly-labelled stacked bars (blue TX, emerald RX), connection-state pill (ACTIVE / DOWN), cumulative byte counters, link-layer (`RoCE` / `IB`) and rate (`100Gb`) badges.  RX path uses Mellanox `vport` counters for accurate switched-traffic numbers.
+- **Editable host names** — click any host name in *Settings → GPU Hosts* to inline-rename (PATCH `/api/hosts/<url>`, 80-char max, optimistic update, Enter/Escape shortcuts).
+- **Drag-and-drop host reordering** — grip handle on each row, native HTML5 drag-and-drop (no new dependency).  New `position` column on the hosts table, atomic re-ordering via `PUT /api/hosts/order`.  Reorder propagates to the top-level tabs, the overview cards, and every other consumer of `hostsData`.
+
+### Changed
+- **`/api-proxy/` no longer forwards cookies / Authorization headers** to GPU exporters.  Central-backend session IDs were leaking into exporter access logs.
+- **Settings page polish** — section headers now have matching iconography (timer / dollar / lock / cpu / settings / activity), `max-w-5xl` for readable column width, redundant inner "Host Management" card title removed.
+
+### Fixed
+- **`PATCH /api/hosts/<url>` returned "Host not found"** — nginx's default `merge_slashes on` collapses the `//` after the URL scheme in URL-encoded path segments, so the backend received `http:/host/...` instead of `http://host/...`.  Both PATCH and the latent same-bug in DELETE now restore the missing slash before the DB lookup.
+- **Power Usage Timeline stuck on "Collecting power data…"** — `PowerUsageChart` filtered every loop iteration on `hosts.isConnected`, but after the central-backend refactor `hosts` was a static list with `isConnected:false` and connection status moved to `hostsData`.  Dashboard now derives a `liveHosts` view that merges the two.
+- **RX bar in fabric activity invisible** — `tailwind.config.ts` redefines `emerald` as a flat color which kills the default emerald scale.  `bg-emerald-500` / `text-emerald-500` produce no CSS rule.  Switched all fabric + settings emerald references to the project's flat `*-emerald` alias.
+
+### Security
+- **Cookie/Authorization stripping on `/api-proxy/`** — see above.
+- **Server-side host-name length cap** (80 chars) on PATCH to bound DB growth.
+- **Audit refreshed** — see `SECURITY.md` and `docs/REFACTOR_BACKLOG.md` for the full v2.3 review and known limitations.
+
+---
+
 ## [2.2.0] — 2026-05-08
 
 ### Added

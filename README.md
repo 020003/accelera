@@ -31,8 +31,14 @@ Real-time monitoring, AI workload management, and cluster analytics for NVIDIA G
 ### Advanced Visualizations
 - **GPU topology map** — interactive ReactFlow diagram showing NVLink / SXM / PCIe interconnections
 - **3D cluster heatmap** — Plotly.js surface plot for utilization, temperature, power, or memory over time
-- **AI workload timeline** — vis-timeline Gantt chart of model loading, inference, training, and GPU allocation events
+- **Live fabric activity** — NVLink + InfiniBand / RoCE per-port TX/RX rates overlaid on the topology, with link-layer and rate badges
 - **Compact legends & time picker** — inline colored-dot legends, per-tab refresh, heatmap time range selector
+
+### Cloud-Cost Equivalent
+- **What did your tokens "save"?** — fleet-wide token usage is priced against ~330 commercial APIs (Claude, OpenAI, Gemini, Kimi, DeepSeek, Llama on OpenRouter, etc.)
+- **Live OpenRouter catalog** — refreshed every 6 h, offline fallback for 17 flagship models, manual refresh button
+- **Per-model breakdown** — `$/Mtok` in / out, prompt + completion cost split, sorted table with `Nx vs cheapest` bar
+- **Time windows** — 24 h / 7 d / 30 d / all-time cumulative; filter by provider, search by model
 
 ### GPU Process Inspector
 - **Deep process analysis** — PID, resolved name, command line, user, VRAM, uptime, CPU%
@@ -53,11 +59,14 @@ Real-time monitoring, AI workload management, and cluster analytics for NVIDIA G
 - **Email notifications** — SMTP-based alert delivery
 
 ### Security
-- **URL validation** — all host/Ollama URLs validated before use (SSRF protection)
-- **Auto-generated secret key** — Flask secret key auto-generated if not set
+- **Server-side auth** — bcrypt password hashes, signed session cookies (HttpOnly + SameSite=Lax), first-run setup flow
+- **Login lockout** — 5 failures → 30 s lockout with exponential backoff up to 15 min
+- **Per-IP rate limiting** — 120 req / 60 s on the central backend, 600 req / 60 s on each GPU exporter
+- **SSRF default-deny** — nginx `/api-proxy/` blocks all RFC1918 ranges unless explicitly allow-listed via `ALLOWED_PROXY_RANGE`; only port 5000 reachable
+- **Cookie scrubbing** — central session cookies + `Authorization` headers are stripped before the `/api-proxy/` forwards to GPU exporters
 - **Parameterized SQL** — no string interpolation in queries
 - **Secret masking** — sensitive config values masked in API responses
-- See [SECURITY.md](SECURITY.md) for the full audit
+- See [SECURITY.md](SECURITY.md) for the full audit and [`docs/REFACTOR_BACKLOG.md`](docs/REFACTOR_BACKLOG.md) for known limitations
 
 ---
 
@@ -84,18 +93,39 @@ Real-time monitoring, AI workload management, and cluster analytics for NVIDIA G
 ## Architecture
 
 ```
-┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
-│   React Frontend │     │  GPU Exporter    │     │  GPU Exporter    │
-│   (port 8080)    │────►│  (host A :5000)  │     │  (host B :5000)  │
-│                  │────►│                  │     │                  │
-│  Vite + TS       │     │  Flask + NVML    │     │  Flask + NVML    │
-│  TailwindCSS     │     │  nvidia-smi      │     │  nvidia-smi      │
-│  shadcn/ui       │     │  Ollama metrics  │     │  Ollama metrics  │
-│  Recharts/Plotly │     │  SQLite storage  │     │  SQLite storage  │
-└──────────────────┘     └──────────────────┘     └──────────────────┘
+                       Browser (HTTPS / HTTP)
+                               │
+                               ▼
+     ┌────────────────────────────────────────────┐
+     │         Nginx 8080  (frontend container)        │
+     │  • SPA static assets        │ SAMEORIGIN headers │
+     │  • /api/         ───────────────────────┐   │
+     │  • /api-proxy/<host>/<path>  (SSRF allowlist) │   │
+     └──────────┬──────────────────────────│────────────────┘
+                │                              │
+                ▼                              ▼
+  ┌──────────────────────────┐     ┌────────────────────────────┐
+  │  Central backend :5001   │     │  GPU exporter(s) :5000     │
+  │                          │     │                            │
+  │  Auth (bcrypt, session)  │     │  /nvidia-smi.json          │
+  │  Hosts CRUD + ordering   │     │  /api/topology  /heatmap   │
+  │  Settings k/v store      │     │  /api/fabric/live          │
+  │  Rate limit + lockout    │     │  /api/tokens/stats         │
+  │  SQLite /app/data        │     │  /api/costs/models         │
+  └──────────────────────────┘     │  /api/gpu/processes        │
+                                  │  /api/alerts/*             │
+                                  │  Flask + NVML + nvidia-smi │
+                                  │  Ollama / SGLang / vLLM    │
+                                  │  SQLite (per-host)         │
+                                  └────────────────────────────┘
 ```
 
-The **frontend** connects directly to each GPU exporter. There is no central backend — each exporter is self-contained with its own API, SQLite database, and Ollama metrics collection.
+Two Flask services:
+
+- **Central backend** — single instance, dedicated to authentication, host CRUD/ordering, and configuration storage.  All state in SQLite on a Docker volume.
+- **GPU exporter** — one per GPU server, stateless w.r.t. users.  Exposes telemetry endpoints and per-host SQLite for time-series buffering.
+
+The browser never talks to a GPU exporter directly: every request goes through the same-origin nginx with an SSRF allowlist (`ALLOWED_PROXY_RANGE`) and cookie/Authorization scrubbing on the exporter path.
 
 ---
 
@@ -177,19 +207,37 @@ python app.py
 
 All settings are via environment variables (`.env` file supported):
 
+**Frontend / nginx**
+
+| Variable | Default | Description |
+|---|---|---|
+| `ALLOWED_PROXY_RANGE` | `10\.` | Regex matched against `host:port` of every `/api-proxy/` request.  Defaults to the entire `10.0.0.0/8` block.  Set this tighter in production (e.g. `10\.2\.` for `10.2.x.x`).  Only port 5000 is ever reachable. |
+| `BACKEND_URL` | `backend:5001` | DNS name of the central backend service inside the Docker network. |
+
+**Central backend**
+
+| Variable | Default | Description |
+|---|---|---|
+| `SECRET_KEY` | *(generated and persisted)* | Signs session cookies.  Auto-generated on first start and saved to `/app/data/.secret_key` (0600).  Set explicitly to keep sessions across volume wipes. |
+| `SESSION_LIFETIME_HOURS` | `24` | Session cookie lifetime. |
+| `SESSION_COOKIE_SECURE` | `false` | Set to `true` when serving over HTTPS so cookies are only sent over TLS. |
+| `FLASK_HOST` / `FLASK_PORT` | `0.0.0.0` / `5001` | Bind address and port (used inside the container; nginx is the public surface). |
+
+**GPU exporter (one per host)**
+
 | Variable | Default | Description |
 |---|---|---|
 | `FLASK_HOST` | `0.0.0.0` | Bind address |
 | `FLASK_PORT` | `5000` | API port |
-| `FLASK_SECRET_KEY` | *(auto-generated)* | Session secret; set explicitly for production |
-| `FLASK_DEBUG` | `false` | Debug mode |
-| `CORS_ORIGINS` | `*` | Allowed origins (comma-separated) |
+| `FLASK_SECRET_KEY` | *(auto-generated)* | Stateless w.r.t. sessions, but used to sign internal tokens; auto-generated if unset |
+| `FLASK_DEBUG` | `false` | Debug mode — keep `false` outside development |
+| `CORS_ORIGINS` | `*` | Allowed origins.  **The exporter has no auth; lock the network instead of relying on this.**  Set explicitly to your nginx origin in production. |
 | `GPU_COLLECT_INTERVAL` | `60` | GPU metric collection interval (seconds) |
 | `HISTORICAL_DATA_RETENTION` | `168` | Data retention (hours) |
-| `OLLAMA_URL` | *(auto-discover)* | Ollama API URL (e.g. `http://host.docker.internal:11434`) |
-| `OLLAMA_METRICS_URL` | `OLLAMA_URL/metrics` | Ollama Prometheus metrics endpoint (if separate sidecar) |
-| `SGLANG_URL` | *(auto-discover)* | SGLang Runtime URL (e.g. `http://host.docker.internal:30000`) |
-| `VLLM_URL` | *(auto-discover)* | vLLM URL (e.g. `http://host.docker.internal:8000`) |
+| `COST_CACHE_TTL` | `21600` | Cloud-model pricing catalog cache TTL (seconds, default 6 h) |
+| `OLLAMA_URL` / `OLLAMA_METRICS_URL` | *(auto-discover)* | Ollama API + Prometheus URLs |
+| `SGLANG_URL` | *(auto-discover)* | SGLang Runtime URL |
+| `VLLM_URL` | *(auto-discover)* | vLLM URL |
 
 See [`.env.example`](.env.example) for the full list.
 
@@ -197,14 +245,32 @@ See [`.env.example`](.env.example) for the full list.
 
 ## API Reference
 
+**Central backend** (proxied to the browser as same-origin `/api/...`)
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/auth/setup` | First-run admin account creation |
+| `POST` | `/api/auth/login` | Verify credentials, create session |
+| `POST` | `/api/auth/logout` | Clear session |
+| `GET` | `/api/auth/status` | Current session + `needsSetup` flag |
+| `PUT` | `/api/auth/password` | Change own password |
+| `GET` | `/api/hosts` | List configured hosts (ordered by `position`) |
+| `POST` | `/api/hosts` | Add a host (URL validated) |
+| `PATCH` | `/api/hosts/<url>` | Rename a host (80-char max) |
+| `DELETE` | `/api/hosts/<url>` | Remove a host |
+| `PUT` | `/api/hosts/order` | Persist a new host ordering (body: list of URLs) |
+| `GET` / `PUT` | `/api/settings` | Runtime configuration k/v store |
+
+**GPU exporter** (proxied as `/api-proxy/<host>:5000/...`)
+
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/nvidia-smi.json` | Current GPU metrics |
 | `GET` | `/api/health` | Health check |
-| `GET` | `/api/hosts` | List configured hosts |
-| `POST` | `/api/hosts` | Add a host (URL validated) |
-| `DELETE` | `/api/hosts/<url>` | Remove a host |
 | `GET` | `/api/topology` | GPU interconnect topology |
+| `GET` | `/api/fabric/live` | Live NVLink + IB / RoCE TX/RX rates |
+| `GET` | `/api/costs/models` | Cached cloud-API pricing catalog (`?refresh=1` to force re-pull) |
+| `GET` | `/api/costs/calculate` | Per-model cost for given prompt/completion totals |
 | `GET` | `/api/heatmap?metric=utilization&hours=6` | Historical heatmap data |
 | `GET` | `/api/timeline` | AI workload timeline events |
 | `GET` | `/api/tokens/stats?hours=24` | Token usage statistics |
@@ -228,7 +294,11 @@ See [`.env.example`](.env.example) for the full list.
 
 **Frontend**: React 18, TypeScript, Vite, TailwindCSS, shadcn/ui, TanStack React Query, Recharts, Plotly.js, ReactFlow, vis-timeline
 
-**Backend**: Flask 3.0, Python 3.10+, nvidia-ml-py3, SQLite (WAL mode), flask-cors
+**Central backend**: Flask 3.0, Python 3.10+, Gunicorn (1 worker × 4 threads), bcrypt, SQLite (WAL mode)
+
+**GPU exporter**: Flask 3.0, Python 3.10+, nvidia-ml-py3, NVML, SQLite (WAL mode)
+
+**Proxy**: nginx 1.29 with envsubst-templated SSRF allowlist
 
 **Deployment**: Docker Compose, Helm Chart (Kubernetes / OpenShift)
 
