@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Timer, DollarSign, Lock, Cpu, LogOut, Eye, EyeOff } from "lucide-react";
+import { Timer, DollarSign, Lock, Cpu, LogOut, Eye, EyeOff, Activity, Settings as SettingsIcon } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { CURRENCIES } from "@/hooks/useCurrency";
@@ -44,7 +44,7 @@ export function SettingsTab({
   fetchAllHostsData,
 }: SettingsTabProps) {
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 max-w-5xl">
       {/* ── Section: Polling & Refresh ── */}
       <section className="space-y-4">
         <div>
@@ -99,7 +99,7 @@ export function SettingsTab({
       <section className="space-y-4">
         <div>
           <h3 className="text-base font-semibold flex items-center gap-2">
-            <DollarSign className="h-4 w-4 text-emerald-500" />
+            <DollarSign className="h-4 w-4 text-emerald" />
             Display & Costs
           </h3>
           <p className="text-sm text-muted-foreground mt-0.5">
@@ -171,6 +171,7 @@ export function SettingsTab({
             </h3>
             <p className="text-sm text-muted-foreground mt-0.5">
               Manage the GPU exporter endpoints this dashboard connects to.
+              Click any host name to rename it.
             </p>
           </div>
           <HostManager
@@ -192,6 +193,15 @@ export function SettingsTab({
       {/* ── Section: Exporter Configuration ── */}
       {!demo && hosts.length > 0 && (
         <section className="space-y-4">
+          <div>
+            <h3 className="text-base font-semibold flex items-center gap-2">
+              <SettingsIcon className="h-4 w-4 text-sky-500" />
+              Exporter Configuration
+            </h3>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Per-host runtime settings for the GPU exporter agents.
+            </p>
+          </div>
           <ConfigPanel hosts={hosts} />
         </section>
       )}
@@ -199,6 +209,15 @@ export function SettingsTab({
       {/* ── Section: System Status ── */}
       {!demo && hosts.length > 0 && (
         <section className="space-y-4">
+          <div>
+            <h3 className="text-base font-semibold flex items-center gap-2">
+              <Activity className="h-4 w-4 text-rose-400" />
+              System Status
+            </h3>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Live health and version info for the exporter on each host.
+            </p>
+          </div>
           <SystemStatus hosts={hosts} />
         </section>
       )}

@@ -1,11 +1,21 @@
 import { useState } from "react";
 import { proxyUrl } from "@/lib/proxy";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Plus, X, Server, Wifi, WifiOff, Loader2, Bot, Sparkles } from "lucide-react";
+import {
+  Plus,
+  X,
+  Wifi,
+  WifiOff,
+  Loader2,
+  Bot,
+  Sparkles,
+  Pencil,
+  Check,
+} from "lucide-react";
 import { toast } from "sonner";
 
 interface Host {
@@ -31,6 +41,50 @@ export function HostManager({ hosts, setHosts, onHostStatusChange, hostsAiInfo }
   const [newHostName, setNewHostName] = useState("");
   const [isAdding, setIsAdding] = useState(false);
   const [removingHost, setRemovingHost] = useState<string | null>(null);
+  const [editingUrl, setEditingUrl] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [savingName, setSavingName] = useState(false);
+
+  const startEdit = (h: Host) => {
+    setEditingUrl(h.url);
+    setEditName(h.name);
+  };
+  const cancelEdit = () => {
+    setEditingUrl(null);
+    setEditName("");
+  };
+  const saveEdit = async (url: string) => {
+    const name = editName.trim();
+    if (!name) {
+      toast.error("Name cannot be empty");
+      return;
+    }
+    const current = hosts.find((h) => h.url === url);
+    if (current && current.name === name) {
+      cancelEdit();
+      return;
+    }
+    setSavingName(true);
+    try {
+      const res = await fetch(`/api/hosts/${encodeURIComponent(url)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Failed to rename (${res.status})`);
+      }
+      setHosts(hosts.map((h) => (h.url === url ? { ...h, name } : h)));
+      toast.success("Host renamed");
+      cancelEdit();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to rename");
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   const addHost = async () => {
     const url = newHostUrl.trim();
@@ -141,14 +195,7 @@ export function HostManager({ hosts, setHosts, onHostStatusChange, hostsAiInfo }
 
   return (
     <Card className="control-panel">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Server className="h-5 w-5" />
-          Host Management
-        </CardTitle>
-      </CardHeader>
-      
-      <CardContent className="space-y-4">
+      <CardContent className="pt-6 space-y-4">
         {/* Add New Host */}
         <div className="grid gap-4 md:grid-cols-3">
           <div className="space-y-2">
@@ -187,53 +234,108 @@ export function HostManager({ hosts, setHosts, onHostStatusChange, hostsAiInfo }
           <div className="space-y-2">
             <Label>Configured Hosts ({hosts.length})</Label>
             <div className="space-y-2">
-              {hosts.map((host) => (
-                <div
-                  key={host.url}
-                  className="flex items-center justify-between p-3 border rounded-lg bg-card/50"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2">
+              {hosts.map((host) => {
+                const isEditing = editingUrl === host.url;
+                return (
+                  <div
+                    key={host.url}
+                    className="flex items-center justify-between gap-3 p-3 border rounded-lg bg-card/50"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
                       {host.isConnected ? (
-                        <Wifi className="h-4 w-4 text-emerald" />
+                        <Wifi className="h-4 w-4 text-emerald shrink-0" />
                       ) : (
-                        <WifiOff className="h-4 w-4 text-muted-foreground" />
+                        <WifiOff className="h-4 w-4 text-muted-foreground shrink-0" />
                       )}
-                      <div>
-                        <div className="font-medium">{host.name}</div>
-                        <div className="text-sm text-muted-foreground">{host.url}</div>
+                      <div className="min-w-0 flex-1">
+                        {isEditing ? (
+                          <div className="flex items-center gap-1.5">
+                            <Input
+                              autoFocus
+                              value={editName}
+                              onChange={(e) => setEditName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") saveEdit(host.url);
+                                else if (e.key === "Escape") cancelEdit();
+                              }}
+                              maxLength={80}
+                              className="h-8 max-w-[280px]"
+                              disabled={savingName}
+                            />
+                            <Button
+                              size="sm"
+                              variant="default"
+                              className="h-8 px-2"
+                              onClick={() => saveEdit(host.url)}
+                              disabled={savingName}
+                              aria-label="Save name"
+                            >
+                              {savingName ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Check className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 px-2"
+                              onClick={cancelEdit}
+                              disabled={savingName}
+                              aria-label="Cancel rename"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => startEdit(host)}
+                            className="group flex items-center gap-1.5 text-left cursor-pointer"
+                            title="Click to rename"
+                          >
+                            <span className="font-medium truncate">{host.name}</span>
+                            <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition" />
+                          </button>
+                        )}
+                        <div className="text-xs text-muted-foreground font-mono truncate">
+                          {host.url}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <Badge variant={host.isConnected ? "default" : "secondary"} className="text-[10px] h-5">
+                          {host.isConnected ? "Connected" : "Disconnected"}
+                        </Badge>
+                        {hostsAiInfo?.[host.url]?.ollama?.isAvailable && (
+                          <Badge variant="secondary" className="gap-1 text-[10px] h-5">
+                            <Bot className="h-3 w-3" />
+                            Ollama · {hostsAiInfo[host.url].ollama!.models.length}
+                          </Badge>
+                        )}
+                        {hostsAiInfo?.[host.url]?.sglang?.isAvailable && (
+                          <Badge variant="secondary" className="gap-1 text-[10px] h-5 bg-cyan-500/10 text-cyan-400">
+                            <Sparkles className="h-3 w-3" />
+                            SGLang · {hostsAiInfo[host.url].sglang!.models.length}
+                          </Badge>
+                        )}
                       </div>
                     </div>
-                    <Badge variant={host.isConnected ? "default" : "secondary"}>
-                      {host.isConnected ? "Connected" : "Disconnected"}
-                    </Badge>
-                    {hostsAiInfo?.[host.url]?.ollama?.isAvailable && (
-                      <Badge variant="secondary" className="gap-1 text-[10px] h-5">
-                        <Bot className="h-3 w-3" />
-                        Ollama · {hostsAiInfo[host.url].ollama!.models.length}
-                      </Badge>
-                    )}
-                    {hostsAiInfo?.[host.url]?.sglang?.isAvailable && (
-                      <Badge variant="secondary" className="gap-1 text-[10px] h-5 bg-cyan-500/10 text-cyan-400">
-                        <Sparkles className="h-3 w-3" />
-                        SGLang · {hostsAiInfo[host.url].sglang!.models.length}
-                      </Badge>
-                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeHost(host.url)}
+                      disabled={removingHost === host.url || isEditing}
+                      title="Remove host"
+                    >
+                      {removingHost === host.url ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <X className="h-4 w-4" />
+                      )}
+                    </Button>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeHost(host.url)}
-                    disabled={removingHost === host.url}
-                  >
-                    {removingHost === host.url ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <X className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

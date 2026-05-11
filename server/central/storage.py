@@ -128,6 +128,18 @@ def delete_host(url: str) -> bool:
     return cur.rowcount > 0
 
 
+def update_host(url: str, name: str) -> bool:
+    """Rename a host.  Returns True iff a row was updated."""
+    try:
+        db = _get_db()
+        cur = db.execute("UPDATE hosts SET name = ? WHERE url = ?", (name, url))
+        db.commit()
+        return cur.rowcount > 0
+    except Exception:
+        log.exception("Failed to update host")
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Settings (key-value)
 # ---------------------------------------------------------------------------

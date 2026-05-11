@@ -58,3 +58,18 @@ def delete_host(url):
     if storage.delete_host(url):
         return jsonify({"message": "Host deleted"})
     return jsonify({"error": "Host not found"}), 404
+
+
+@hosts_bp.route("/api/hosts/<path:url>", methods=["PATCH"])
+@login_required
+def update_host(url):
+    """Update mutable fields of a host (currently: display name)."""
+    data = request.get_json() or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "Missing name"}), 400
+    if len(name) > 80:
+        return jsonify({"error": "Name too long (max 80 chars)"}), 400
+    if storage.update_host(url, name):
+        return jsonify({"url": url, "name": name})
+    return jsonify({"error": "Host not found"}), 404
