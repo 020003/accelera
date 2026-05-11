@@ -14,7 +14,8 @@ import { SettingsTab } from "@/components/SettingsTab";
 import { useCurrency } from "@/hooks/useCurrency";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Monitor, BarChart3, Cog, TrendingUp, Bell, ShieldAlert } from "lucide-react";
+import { Monitor, BarChart3, Cog, TrendingUp, Bell, ShieldAlert, DollarSign } from "lucide-react";
+import { CostAnalysisTab } from "@/components/CostAnalysisTab";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 import type { NvidiaSmiResponse } from "@/types/gpu";
@@ -625,6 +626,10 @@ export default function Dashboard() {
               <TrendingUp className="h-4 w-4" />
               Advanced Visualizations
             </TabsTrigger>
+            <TabsTrigger value="costs" className="flex items-center gap-2">
+              <DollarSign className="h-4 w-4" />
+              Cost Analysis
+            </TabsTrigger>
             {hostsData.map((host) => (
               <TabsTrigger key={host.url} value={host.url} className="flex items-center gap-1.5">
                 <Monitor className="h-4 w-4" />
@@ -689,6 +694,11 @@ export default function Dashboard() {
                 />
               </>
             )}
+          </TabsContent>
+
+          {/* Cost Analysis Tab */}
+          <TabsContent value="costs" className="space-y-4">
+            <CostAnalysisTab hosts={hosts} />
           </TabsContent>
 
           {/* Advanced Visualizations Tab */}
