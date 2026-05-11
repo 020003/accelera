@@ -171,7 +171,7 @@ export function SettingsTab({
             </h3>
             <p className="text-sm text-muted-foreground mt-0.5">
               Manage the GPU exporter endpoints this dashboard connects to.
-              Click any host name to rename it.
+              Click a host name to rename it, or drag the grip handle to reorder.
             </p>
           </div>
           <HostManager

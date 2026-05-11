@@ -526,8 +526,19 @@ export default function Dashboard() {
       if (filteredData.length !== newData.length) {
         hasChanges = true;
       }
-      
-      return hasChanges ? filteredData : prevData;
+
+      // Keep hostsData in the same order as the hosts state so that
+      // user-driven reordering (drag-and-drop in Settings) propagates
+      // to the tab list, overview, and any other consumer that maps
+      // over hostsData.
+      const orderIndex = new Map<string, number>(results.map((r, i) => [r.url, i]));
+      const sorted = [...filteredData].sort(
+        (a, b) => (orderIndex.get(a.url) ?? 0) - (orderIndex.get(b.url) ?? 0),
+      );
+      const orderChanged = sorted.some((h, i) => h.url !== filteredData[i]?.url);
+      if (orderChanged) hasChanges = true;
+
+      return hasChanges ? sorted : prevData;
     });
     
     // Connection status is derived from hostsData — no need to mirror

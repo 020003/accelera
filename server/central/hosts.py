@@ -64,6 +64,18 @@ def add_host():
     return jsonify({"error": "Failed to save host"}), 500
 
 
+@hosts_bp.route("/api/hosts/order", methods=["PUT"])
+@login_required
+def reorder_hosts():
+    """Persist a new host ordering.  Body: a JSON list of host URLs."""
+    data = request.get_json()
+    if not isinstance(data, list) or not all(isinstance(u, str) for u in data):
+        return jsonify({"error": "Body must be a JSON list of URLs"}), 400
+    if storage.reorder_hosts(data):
+        return jsonify({"hosts": storage.load_hosts()})
+    return jsonify({"error": "URL set does not match stored hosts"}), 400
+
+
 @hosts_bp.route("/api/hosts/<path:url>", methods=["DELETE"])
 @login_required
 def delete_host(url):

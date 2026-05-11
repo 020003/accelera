@@ -51,6 +51,14 @@ def init_db():
             updated_at REAL NOT NULL
         );
     """)
+    # Migrate: add `position` to hosts if missing, then seed with rowid
+    # order so existing rows keep their original sequence.
+    cols = {r["name"] for r in db.execute("PRAGMA table_info(hosts)")}
+    if "position" not in cols:
+        db.execute("ALTER TABLE hosts ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+        rows = db.execute("SELECT url FROM hosts ORDER BY created_at").fetchall()
+        for i, r in enumerate(rows):
+            db.execute("UPDATE hosts SET position = ? WHERE url = ?", (i, r["url"]))
     db.commit()
 
 
@@ -103,21 +111,46 @@ def update_password(username: str, password_hash: str) -> bool:
 
 def load_hosts() -> list[dict]:
     db = _get_db()
-    rows = db.execute("SELECT url, name, created_at FROM hosts ORDER BY created_at").fetchall()
+    rows = db.execute(
+        "SELECT url, name, created_at FROM hosts ORDER BY position, created_at"
+    ).fetchall()
     return [dict(r) for r in rows]
 
 
 def save_host(url: str, name: str, created_at: str) -> bool:
     try:
         db = _get_db()
+        # Append new hosts to the end of the ordering.
+        max_pos = db.execute("SELECT COALESCE(MAX(position), -1) FROM hosts").fetchone()[0]
         db.execute(
-            "INSERT OR IGNORE INTO hosts (url, name, created_at) VALUES (?, ?, ?)",
-            (url, name, created_at),
+            "INSERT OR IGNORE INTO hosts (url, name, created_at, position) "
+            "VALUES (?, ?, ?, ?)",
+            (url, name, created_at, max_pos + 1),
         )
         db.commit()
         return True
     except Exception:
         log.exception("Failed to save host")
+        return False
+
+
+def reorder_hosts(urls: list[str]) -> bool:
+    """Persist a new host ordering.  ``urls`` must be a permutation of
+    the currently-stored host URLs; any extras/missing are rejected.
+    Returns True on success."""
+    try:
+        db = _get_db()
+        current = {r["url"] for r in db.execute("SELECT url FROM hosts")}
+        if set(urls) != current:
+            log.warning("reorder_hosts: %d urls submitted, %d in DB (mismatch)",
+                        len(urls), len(current))
+            return False
+        with db:
+            for i, url in enumerate(urls):
+                db.execute("UPDATE hosts SET position = ? WHERE url = ?", (i, url))
+        return True
+    except Exception:
+        log.exception("Failed to reorder hosts")
         return False
 
 

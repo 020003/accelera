@@ -15,6 +15,7 @@ import {
   Sparkles,
   Pencil,
   Check,
+  GripVertical,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -44,6 +45,47 @@ export function HostManager({ hosts, setHosts, onHostStatusChange, hostsAiInfo }
   const [editingUrl, setEditingUrl] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [savingName, setSavingName] = useState(false);
+  const [dragUrl, setDragUrl] = useState<string | null>(null);
+  const [dragOverUrl, setDragOverUrl] = useState<string | null>(null);
+
+  const persistOrder = async (orderedUrls: string[]) => {
+    try {
+      const res = await fetch("/api/hosts/order", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(orderedUrls),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Failed to save order (${res.status})`);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save order");
+    }
+  };
+
+  const onDrop = (targetUrl: string) => {
+    if (!dragUrl || dragUrl === targetUrl) {
+      setDragUrl(null);
+      setDragOverUrl(null);
+      return;
+    }
+    const fromIdx = hosts.findIndex((h) => h.url === dragUrl);
+    const toIdx = hosts.findIndex((h) => h.url === targetUrl);
+    if (fromIdx === -1 || toIdx === -1) {
+      setDragUrl(null);
+      setDragOverUrl(null);
+      return;
+    }
+    const next = [...hosts];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    setHosts(next);                              // optimistic local update
+    persistOrder(next.map((h) => h.url));         // background persist (revert handled via toast)
+    setDragUrl(null);
+    setDragOverUrl(null);
+  };
 
   const startEdit = (h: Host) => {
     setEditingUrl(h.url);
@@ -236,11 +278,47 @@ export function HostManager({ hosts, setHosts, onHostStatusChange, hostsAiInfo }
             <div className="space-y-2">
               {hosts.map((host) => {
                 const isEditing = editingUrl === host.url;
+                const isDragging = dragUrl === host.url;
+                const isDragOver = dragOverUrl === host.url && dragUrl !== host.url;
                 return (
                   <div
                     key={host.url}
-                    className="flex items-center justify-between gap-3 p-3 border rounded-lg bg-card/50"
+                    onDragOver={(e) => {
+                      if (!dragUrl || dragUrl === host.url) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      if (dragOverUrl !== host.url) setDragOverUrl(host.url);
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverUrl === host.url) setDragOverUrl(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      onDrop(host.url);
+                    }}
+                    className={`flex items-center justify-between gap-3 p-3 border rounded-lg bg-card/50 transition ${
+                      isDragging ? "opacity-40" : ""
+                    } ${isDragOver ? "border-primary ring-1 ring-primary/40" : ""}`}
                   >
+                    <div
+                      draggable={!isEditing}
+                      onDragStart={(e) => {
+                        if (isEditing) return;
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", host.url);
+                        setDragUrl(host.url);
+                      }}
+                      onDragEnd={() => {
+                        setDragUrl(null);
+                        setDragOverUrl(null);
+                      }}
+                      className={`text-muted-foreground hover:text-foreground shrink-0 ${
+                        isEditing ? "cursor-not-allowed opacity-30" : "cursor-grab active:cursor-grabbing"
+                      }`}
+                      title={isEditing ? "" : "Drag to reorder"}
+                    >
+                      <GripVertical className="h-4 w-4" />
+                    </div>
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       {host.isConnected ? (
                         <Wifi className="h-4 w-4 text-emerald shrink-0" />
