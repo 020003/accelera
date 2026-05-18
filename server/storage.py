@@ -405,12 +405,14 @@ def get_token_stats(hours: int = 24) -> dict:
     """Return aggregated token statistics for the given window.
 
     Notes on correctness:
-      * Counters from Ollama / SGLang / vLLM are monotonic, so window
-        deltas are computed as MAX-MIN per model (cheap and accurate).
-      * Counter resets (server restart) within the window cause MAX-MIN
-        to UNDERCOUNT — we additionally compute pairwise-diff totals
-        from the time-series and use the larger of the two as a
-        best-effort estimate.
+      * Window deltas are computed as a **pairwise sum** across the
+        time-series snapshots — for every consecutive pair we add
+        ``max(curr - prev, 0)`` and treat ``curr < prev`` as a counter
+        reset (server restart) by attributing only ``curr`` to that
+        interval.  This is reset-safe; MAX-MIN is not (a restart mid-
+        window inflates the windowed delta by the entire pre-restart
+        history).  MAX-MIN is still used for the *cumulative_* fields
+        which are explicitly "latest peak the counter ever reached".
       * History buckets are zero-filled across the full window so the
         x-axis is continuous (chart doesn't bunch up around activity).
       * `current_tps` is averaged over the last 5 minutes rather than
@@ -449,6 +451,43 @@ def get_token_stats(hours: int = 24) -> dict:
         (cutoff,),
     ).fetchall()
 
+    # Pairwise per-model deltas — reset-safe (see docstring).  Computed
+    # in a single pass over the time-series so we don't need a second
+    # SQL trip.  Same bound on per-interval delta as the chart loop.
+    _per_model_rows = db.execute(
+        "SELECT timestamp, model, generated_tokens, prompt_tokens, "
+        "       request_count, request_duration_sum "
+        "FROM token_snapshots WHERE timestamp >= ? ORDER BY model, timestamp",
+        (cutoff,),
+    ).fetchall()
+    # Per-interval cap: anything bigger is almost certainly a corrupt
+    # snapshot (not a counter reset — those are detected by the
+    # `curr < prev` branch above and credited as `curr`).  10 M tokens
+    # between two scrapes corresponds to ~166 k tok/s sustained across
+    # a 60 s scrape gap, comfortably above realistic single-host vLLM
+    # throughput.  The old 500 k cap was silently dropping legitimate
+    # bursts on heavily-loaded servers.
+    _max_delta = 10_000_000
+    _pairwise: dict[str, dict] = {}
+    _prev_by_model: dict[str, tuple] = {}
+    for r in _per_model_rows:
+        m = r["model"]
+        cur = (r["generated_tokens"], r["prompt_tokens"],
+               r["request_count"], r["request_duration_sum"])
+        prev = _prev_by_model.get(m)
+        if prev is not None:
+            dg = cur[0] - prev[0] if cur[0] >= prev[0] else cur[0]
+            dp = cur[1] - prev[1] if cur[1] >= prev[1] else cur[1]
+            dr = cur[2] - prev[2] if cur[2] >= prev[2] else cur[2]
+            dd = cur[3] - prev[3] if cur[3] >= prev[3] else cur[3]
+            if dg <= _max_delta and dp <= _max_delta:
+                acc = _pairwise.setdefault(m, {"g": 0, "p": 0, "r": 0, "d": 0.0})
+                acc["g"] += dg
+                acc["p"] += dp
+                acc["r"] += dr
+                acc["d"] += dd
+        _prev_by_model[m] = cur
+
     models = {}
     total_generated = 0
     total_prompt = 0
@@ -458,10 +497,11 @@ def get_token_stats(hours: int = 24) -> dict:
     cumulative_prompt = 0
     cumulative_requests = 0
     for r in models_raw:
-        gen = max(r["gen_max"] - r["gen_min"], 0)
-        pt = max(r["pt_max"] - r["pt_min"], 0)
-        rc = max(r["rc_max"] - r["rc_min"], 0)
-        dur = max(r["rd_max"] - r["rd_min"], 0.0)
+        acc = _pairwise.get(r["model"], {"g": 0, "p": 0, "r": 0, "d": 0.0})
+        gen = acc["g"]
+        pt = acc["p"]
+        rc = acc["r"]
+        dur = acc["d"]
         # Windowed average tokens/sec.  Prefer the dedicated TPT counter
         # (Δsum / Δcount), but Ollama only updates this on specific code
         # paths, so fall back to generated_tokens / request_duration —
@@ -513,7 +553,7 @@ def get_token_stats(hours: int = 24) -> dict:
     # the next bucket. max_delta_per_interval (below) is a separate
     # protection against bad counter values.
     gap_threshold = bucket_sec * 4
-    max_delta_per_interval = 500_000
+    max_delta_per_interval = 10_000_000  # see notes on _max_delta above
     for model, pts in series_by_model.items():
         if not pts:
             continue
@@ -570,14 +610,10 @@ def get_token_stats(hours: int = 24) -> dict:
             if dt > 0 and dg > 0:
                 current_tps += dg / dt
 
-    # Cross-check window totals against pairwise sum (catches counter
-    # resets that MAX-MIN missed).
-    pairwise_gen = sum(b["generated"] for b in bucket_map.values())
-    pairwise_pt = sum(b["prompt"] for b in bucket_map.values())
-    if pairwise_gen > total_generated:
-        total_generated = pairwise_gen
-    if pairwise_pt > total_prompt:
-        total_prompt = pairwise_pt
+    # NOTE: totals are now computed pairwise above, so no MAX-MIN
+    # fix-up is needed here.  The chart's bucket sums are guaranteed
+    # to be ≤ per-model pairwise totals (they share the same dg/dp
+    # logic), so the two views agree by construction.
 
     return {
         "summary": {
