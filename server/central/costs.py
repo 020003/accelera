@@ -1,4 +1,4 @@
-"""Cloud-model cost catalog.
+"""Cloud-model cost catalog (central backend).
 
 Returns a normalised list of commercial LLM API prices so the frontend
 can compute "what would this fleet's token usage have cost on Claude
@@ -7,15 +7,13 @@ Opus / GPT-4o / Kimi K2 / etc.".
 Pricing source
 --------------
 We pull OpenRouter's public catalog (https://openrouter.ai/api/v1/models)
-because it aggregates per-provider pricing for ~300 models in a single
-JSON document, refreshed by the upstream team, and requires no auth.
-Prices come back in USD per *token* — we convert to USD per million
-tokens (the units humans read on provider pricing pages).
+because it aggregates per-provider pricing for ~300 models in one
+JSON document and requires no auth.  Prices arrive in USD per *token*;
+we convert to USD per million tokens (the units humans read on
+provider pricing pages).
 
-The catalog is cached in-process for ``COST_CACHE_TTL`` seconds (default
-6h) so we don't hammer the upstream and don't break when offline.  A
-small hand-curated fallback list ships with the code for the case where
-the very first fetch fails (fresh container, no internet).
+Moved here from the GPU exporter in v2.4 to dedupe N-host outbound
+fetches into a single cache served from the same origin as auth.
 """
 
 from __future__ import annotations
@@ -29,6 +27,8 @@ from typing import Any
 import requests
 from flask import Blueprint, jsonify, request
 
+from auth import login_required
+
 log = logging.getLogger(__name__)
 costs_bp = Blueprint("costs", __name__)
 
@@ -40,9 +40,9 @@ _cache_lock = threading.Lock()
 _cache: dict[str, Any] = {"models": [], "fetched_at": 0.0, "source": "none"}
 
 
-# Minimum hand-curated fallback so the tab is never empty.  Prices are
-# in USD per *million* tokens (input / output), accurate as of mid-2026.
-# These are only used if the OpenRouter fetch has never succeeded.
+# Minimum hand-curated fallback so the tab is never empty.  Prices in
+# USD per *million* tokens (input / output), accurate as of mid-2026.
+# Only used if the OpenRouter fetch has never succeeded.
 FALLBACK_MODELS: list[dict[str, Any]] = [
     {"id": "anthropic/claude-opus-4",     "name": "Claude Opus 4",         "provider": "anthropic", "prompt_per_mtok": 15.0,  "completion_per_mtok": 75.0,  "context": 200000},
     {"id": "anthropic/claude-sonnet-4",   "name": "Claude Sonnet 4",       "provider": "anthropic", "prompt_per_mtok": 3.0,   "completion_per_mtok": 15.0,  "context": 200000},
@@ -74,7 +74,6 @@ def _normalise_openrouter(payload: dict[str, Any]) -> list[dict[str, Any]]:
         except (TypeError, ValueError):
             continue
         if p_in <= 0 and p_out <= 0:
-            # Free models — skip, not interesting for a cost comparison
             continue
         mid = str(m.get("id") or "").strip()
         if not mid:
@@ -94,7 +93,7 @@ def _normalise_openrouter(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _refresh_blocking() -> tuple[list[dict[str, Any]], str]:
     """Fetch from OpenRouter; return (models, source).  Falls back to
-    the cached or hard-coded list on any error."""
+    the previously-cached or hard-coded list on any error."""
     try:
         r = requests.get(OPENROUTER_URL, timeout=HTTP_TIMEOUT,
                          headers={"User-Agent": "accelera-cost-catalog/1.0"})
@@ -106,7 +105,6 @@ def _refresh_blocking() -> tuple[list[dict[str, Any]], str]:
         raise RuntimeError("empty model list")
     except Exception as e:  # noqa: BLE001
         log.warning("Cost catalog fetch failed (%s); using fallback", e)
-        # If we have a previously-cached upstream copy, keep it
         if _cache["models"] and _cache["source"] == "openrouter":
             return _cache["models"], "openrouter-cached"
         return FALLBACK_MODELS, "fallback"
@@ -129,21 +127,22 @@ def _get_catalog(force: bool = False) -> dict[str, Any]:
 
 
 @costs_bp.route("/api/costs/models", methods=["GET"])
+@login_required
 def costs_models():
     """Return the cached model pricing catalog.
 
     Query params:
-      refresh=1   force an upstream re-fetch (rate-limited by cache TTL
-                  upper-bound — at most one fetch per request)
+      refresh=1   force an upstream re-fetch (bounded by cache TTL)
     """
     force = request.args.get("refresh") in ("1", "true", "yes")
     return jsonify(_get_catalog(force=force))
 
 
 @costs_bp.route("/api/costs/calculate", methods=["GET"])
+@login_required
 def costs_calculate():
-    """Convenience endpoint: given prompt + completion token totals,
-    return a per-model cost breakdown sorted ascending by total cost.
+    """Given prompt + completion token totals, return per-model cost
+    breakdowns sorted ascending by total cost.
 
     Query params (all required):
       prompt_tokens=<int>

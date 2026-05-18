@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.4.0] — 2026-05-18
+
+### Added
+- **Public REST API** (`/api/v1`) — bearer-token authenticated programmatic access to the fleet for Grafana, scripts, CI, and external integrations.  Endpoints:
+  - `GET /api/v1`                  — unauthenticated index of available routes
+  - `GET /api/v1/whoami`           — metadata about the calling token
+  - `GET /api/v1/hosts`            — configured fleet members (in user-defined order)
+  - `GET /api/v1/fleet/summary`    — parallel fan-out GPU snapshot with fleet-wide totals (gpu_count, power_w, memory_used/total)
+  - `GET /api/v1/fleet/tokens`     — aggregated LLM token usage across all exporters (`?hours=1..720`)
+  - `GET /api/v1/costs/models`     — cloud-model pricing catalog (shares the central cache from v2.3)
+  - `GET /api/v1/costs/calculate`  — `?prompt_tokens=N&completion_tokens=N` → ranked cost table
+- **Swagger UI + OpenAPI 3.1 spec** — interactive docs at `/api/v1/docs` (CDN-loaded swagger-ui-dist, scoped CSP), machine-readable spec at `/api/v1/openapi.json`. Authorize button persists the bearer token across page reloads; every endpoint has request/response schemas and example values.
+- **API token management** — new "API Tokens" section in Settings.  Mint named tokens (`acc_<32hex>`), optional expiry (30 d / 90 d / 180 d / 1 y / never), `read` or `read:write` scope, view prefix + last-used timestamp, revoke with one click.  Plaintext is shown exactly once and bcrypt-hashed at rest with a fast 12-char prefix index.
+- **Error boundary per dashboard tab** (`TabErrorBoundary`) — a render error in one tab no longer white-screens the whole dashboard.  Each tab gets a stack-trace `<details>` and a Retry button.
+
+### Changed
+- **Cost catalog moved from GPU exporter to central backend** (`server/blueprints/costs.py` → `server/central/costs.py`).  Previously the frontend fanned out a `/api/costs/models` request to one exporter per page load.  Now it's a single same-origin `GET /api/costs/models` served from a per-process central cache.  Removed the `_hostUrls` arg from `useModelCatalog()`.
+- **`hosts.isConnected` invariant** — Dashboard now mirrors live connection status from `hostsData` back into the `hosts` array after every poll, eliminating the drift bug class that caused the v2.3 power-chart regression.  Consumers can read `.isConnected` from either array safely.  (Documented invariant; full hook extraction tracked as **R-1** in the refactor backlog.)
+
+### Fixed
+- (none — feature release)
+
+### Security
+- **API tokens are bcrypt-hashed** with a per-token salt.  Lookup is by 12-char prefix (8 chars of entropy) followed by a constant-time bcrypt verify.  Plaintext is never logged or stored.
+- `/api/v1/*` runs through the existing per-IP rate limiter and login-lockout middleware — no separate auth bypass.
+- Token revocation is immediate (set `revoked = 1`); no signed-JWT replay window.
+
+---
+
 ## [2.3.0] — 2026-05-11
 
 ### Added

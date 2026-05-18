@@ -46,10 +46,18 @@ storage.init_db()
 from auth import auth_bp
 from hosts import hosts_bp
 from settings_bp import settings_bp
+from costs import costs_bp
+from api_tokens import tokens_bp
+from api_v1 import api_v1_bp
+from openapi import openapi_bp
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(hosts_bp)
 app.register_blueprint(settings_bp)
+app.register_blueprint(costs_bp)
+app.register_blueprint(tokens_bp)
+app.register_blueprint(api_v1_bp)
+app.register_blueprint(openapi_bp)
 
 
 @app.route("/health")

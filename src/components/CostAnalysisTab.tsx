@@ -16,7 +16,6 @@ import {
 import { useModelCatalog, type CatalogModel } from "@/hooks/useModelCatalog";
 import { useFleetTokenStats } from "@/hooks/useFleetTokenStats";
 import { useQueryClient } from "@tanstack/react-query";
-import { proxyUrl } from "@/lib/proxy";
 
 interface Host {
   url: string;
@@ -73,7 +72,7 @@ export function CostAnalysisTab({ hosts }: Props) {
   const [search, setSearch] = useState("");
 
   const hostUrls = hosts.map((h) => h.url);
-  const catalogQ = useModelCatalog(hostUrls);
+  const catalogQ = useModelCatalog();
   const tokens = useFleetTokenStats(hostUrls, WINDOW_HOURS[timeWindow]);
   const qc = useQueryClient();
 
@@ -131,14 +130,12 @@ export function CostAnalysisTab({ hosts }: Props) {
   };
 
   const refreshCatalog = async () => {
-    // Force the backend to re-pull from OpenRouter, then invalidate React Query cache
-    const base = (hostUrls[0] ?? "").replace(/\/nvidia-smi\.json$/, "");
-    if (base) {
-      try {
-        await fetch(proxyUrl(`${base}/api/costs/models?refresh=1`));
-      } catch {
-        /* ignore — React Query refetch below will still kick in */
-      }
+    // Force the central backend to re-pull from OpenRouter, then
+    // invalidate the React Query cache so the UI shows fresh prices.
+    try {
+      await fetch("/api/costs/models?refresh=1", { credentials: "include" });
+    } catch {
+      /* ignore — invalidate below will trigger a normal refetch */
     }
     qc.invalidateQueries({ queryKey: ["model-catalog"] });
   };

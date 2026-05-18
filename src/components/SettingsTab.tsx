@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Timer, DollarSign, Lock, Cpu, LogOut, Eye, EyeOff, Activity, Settings as SettingsIcon } from "lucide-react";
+import { Timer, DollarSign, Lock, Cpu, LogOut, Eye, EyeOff, Activity, Settings as SettingsIcon, KeyRound } from "lucide-react";
+import { ApiTokensManager } from "@/components/ApiTokensManager";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { CURRENCIES } from "@/hooks/useCurrency";
@@ -159,6 +160,22 @@ export function SettingsTab({
           </p>
         </div>
         <DashboardAccessCard />
+      </section>
+
+      {/* ── Section: API Tokens ── */}
+      <section className="space-y-4">
+        <div>
+          <h3 className="text-base font-semibold flex items-center gap-2">
+            <KeyRound className="h-4 w-4 text-violet-500" />
+            API Tokens
+          </h3>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Bearer tokens for the Accelera public API at{" "}
+            <code className="font-mono text-[11px]">/api/v1</code>. Use these
+            for Grafana, scripts, CI, or third-party integrations.
+          </p>
+        </div>
+        <ApiTokensManager />
       </section>
 
       {/* ── Section: GPU Hosts ── */}

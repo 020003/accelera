@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Monitor, BarChart3, Cog, TrendingUp, Bell, ShieldAlert, DollarSign } from "lucide-react";
 import { CostAnalysisTab } from "@/components/CostAnalysisTab";
+import { TabErrorBoundary } from "@/components/TabErrorBoundary";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 import type { NvidiaSmiResponse } from "@/types/gpu";
@@ -71,15 +72,14 @@ export default function Dashboard() {
     hostsData.map(host => [host.url, { gpus: host.gpus, timestamp: host.timestamp }])
   );
 
-  // Live host list with up-to-date connection status.  The `hosts`
-  // state is loaded once from /api/hosts with isConnected:false and is
-  // never mutated; the actual connection status lives in `hostsData`.
-  // PowerUsageChart (and any other consumer that needs isConnected)
-  // must use this derived view, not raw `hosts`.
-  const liveHosts = hosts.map((h) => {
-    const d = hostsData.find((hd) => hd.url === h.url);
-    return { ...h, isConnected: d?.isConnected ?? false };
-  });
+  // INVARIANT: `hosts[i].isConnected` always equals
+  // `hostsData.find(d => d.url === hosts[i].url)?.isConnected ?? false`.
+  // Maintained by `syncHostsConnection()` called after every poll.
+  // Consumers can read `.isConnected` from either array safely.
+  //
+  // A proper unification into a single useFleetHosts() hook is tracked
+  // as R-1 in docs/REFACTOR_BACKLOG.md; this is the minimal correctness
+  // fix that eliminates the drift bug class without rewriting consumers.
   
 
   // Demo mode API query
@@ -540,10 +540,27 @@ export default function Dashboard() {
 
       return hasChanges ? sorted : prevData;
     });
-    
-    // Connection status is derived from hostsData — no need to mirror
-    // it back into the hosts array (which would trigger re-renders and
-    // potentially re-fire the polling effect).
+
+    // Maintain the invariant: hosts[i].isConnected mirrors the live
+    // poll result.  `hostsKey` (the polling effect's dep) memoises on
+    // URL value, not array identity, so this does NOT re-fire the
+    // polling effect.  This eliminates the drift bug class that caused
+    // the v2.3 power-chart regression.
+    setHosts((prev) => {
+      const liveByUrl = new Map<string, boolean>(
+        results.map((r) => [r.url, r.isConnected]),
+      );
+      let mutated = false;
+      const next = prev.map((h) => {
+        const live = liveByUrl.get(h.url) ?? false;
+        if (h.isConnected !== live) {
+          mutated = true;
+          return { ...h, isConnected: live };
+        }
+        return h;
+      });
+      return mutated ? next : prev;
+    });
     } finally {
       fetchInProgress.current = false;
     }
@@ -685,6 +702,7 @@ export default function Dashboard() {
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
+            <TabErrorBoundary name="Overview">
             {hostsData.length === 0 && !demo ? (
               <Card>
                 <CardContent className="flex flex-col items-center justify-center py-20 text-center">
@@ -707,7 +725,7 @@ export default function Dashboard() {
               <>
                 <MultiHostOverview hostsData={hostsData} energyRate={energyRate} currencySymbol={currency.symbol} />
                 <PowerUsageChart 
-                  hosts={liveHosts} 
+                  hosts={hosts} 
                   hostData={hostDataMap} 
                   refreshInterval={refreshInterval}
                   energyRate={energyRate}
@@ -715,15 +733,19 @@ export default function Dashboard() {
                 />
               </>
             )}
+            </TabErrorBoundary>
           </TabsContent>
 
           {/* Cost Analysis Tab */}
           <TabsContent value="costs" className="space-y-4">
-            <CostAnalysisTab hosts={hosts} />
+            <TabErrorBoundary name="Cost Analysis">
+              <CostAnalysisTab hosts={hosts} />
+            </TabErrorBoundary>
           </TabsContent>
 
           {/* Advanced Visualizations Tab */}
           <TabsContent value="visualizations" className="space-y-4">
+            <TabErrorBoundary name="Advanced Visualizations">
             <VisualizationsTab
               topologyData={topologyData}
               hosts={hosts}
@@ -736,11 +758,13 @@ export default function Dashboard() {
               vizRefreshing={vizRefreshing}
               setVizRefreshing={setVizRefreshing}
             />
+            </TabErrorBoundary>
           </TabsContent>
 
           {/* Individual Host Tabs */}
           {hostsData.map((host) => (
             <TabsContent key={host.url} value={host.url}>
+              <TabErrorBoundary name={host.name}>
               <HostTab
                 hostName={host.name}
                 hostUrl={host.url}
@@ -756,16 +780,20 @@ export default function Dashboard() {
                 sglang={host.sglang}
                 vllm={host.vllm}
               />
+              </TabErrorBoundary>
             </TabsContent>
           ))}
 
           {/* Alerts Tab */}
           <TabsContent value="alerts" className="space-y-6">
-            <AlertsManager />
+            <TabErrorBoundary name="Alerts">
+              <AlertsManager />
+            </TabErrorBoundary>
           </TabsContent>
 
           {/* GPU Health Events Tab */}
           <TabsContent value="gpu-events" className="space-y-6">
+            <TabErrorBoundary name="GPU Health">
             {hostsData.length > 0 ? (
               hostsData.map((host) => (
                 <div key={host.url} className="space-y-2">
@@ -776,10 +804,12 @@ export default function Dashboard() {
             ) : (
               <GpuEventsPanel />
             )}
+            </TabErrorBoundary>
           </TabsContent>
 
           {/* Settings Tab */}
           <TabsContent value="settings">
+            <TabErrorBoundary name="Settings">
             <SettingsTab
               refreshInterval={refreshInterval}
               handleRefreshInterval={handleRefreshInterval}
@@ -794,6 +824,7 @@ export default function Dashboard() {
               hostsData={hostsData}
               fetchAllHostsData={fetchAllHostsData}
             />
+            </TabErrorBoundary>
           </TabsContent>
         </Tabs>
       </main>

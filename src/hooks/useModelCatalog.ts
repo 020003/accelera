@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { proxyUrl } from "@/lib/proxy";
 
 export interface CatalogModel {
   id: string;
@@ -19,31 +18,21 @@ export interface ModelCatalog {
   count: number;
 }
 
-/** Fetch the cloud-model pricing catalog from any reachable GPU-exporter
- *  (every host runs the same backend, the catalog is identical).  Falls
- *  through hosts until one responds. */
-export function useModelCatalog(hostUrls: string[]) {
-  // Stable key from the host list so we refetch only when topology changes.
-  const key = hostUrls.join("|");
-
+/** Fetch the cloud-model pricing catalog from the central backend.
+ *  Same-origin call (no /api-proxy/ fan-out): one fetch for the whole
+ *  fleet, served from the central cache. */
+export function useModelCatalog(enabled: boolean = true) {
   return useQuery<ModelCatalog>({
-    queryKey: ["model-catalog", key],
-    enabled: hostUrls.length > 0,
-    staleTime: 6 * 60 * 60 * 1000, // 6h — matches backend cache
+    queryKey: ["model-catalog"],
+    enabled,
+    staleTime: 6 * 60 * 60 * 1000, // 6h — matches backend cache TTL
     refetchInterval: 30 * 60 * 1000, // 30min sanity refresh
     queryFn: async () => {
-      let lastErr: unknown;
-      for (const raw of hostUrls) {
-        const base = raw.replace(/\/nvidia-smi\.json$/, "");
-        try {
-          const res = await fetch(proxyUrl(`${base}/api/costs/models`));
-          if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-          return (await res.json()) as ModelCatalog;
-        } catch (e) {
-          lastErr = e;
-        }
-      }
-      throw lastErr ?? new Error("no hosts reachable");
+      const res = await fetch("/api/costs/models", {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return (await res.json()) as ModelCatalog;
     },
   });
 }

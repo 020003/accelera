@@ -1,6 +1,6 @@
 """SQLite persistence for the central backend.
 
-Tables: users, hosts, settings.
+Tables: users, hosts, settings, api_tokens.
 """
 
 import logging
@@ -50,6 +50,20 @@ def init_db():
             value TEXT NOT NULL,
             updated_at REAL NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS api_tokens (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            prefix TEXT NOT NULL,
+            token_hash TEXT NOT NULL,
+            scopes TEXT NOT NULL DEFAULT 'read',
+            created_by TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            last_used_at REAL,
+            expires_at REAL,
+            revoked INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_api_tokens_prefix ON api_tokens(prefix);
     """)
     # Migrate: add `position` to hosts if missing, then seed with rowid
     # order so existing rows keep their original sequence.
@@ -206,5 +220,84 @@ def get_all_settings() -> dict:
 def delete_setting(key: str) -> bool:
     db = _get_db()
     cur = db.execute("DELETE FROM settings WHERE key = ?", (key,))
+    db.commit()
+    return cur.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# API tokens
+# ---------------------------------------------------------------------------
+
+def create_api_token(token_id: str, name: str, prefix: str, token_hash: str,
+                     scopes: str, created_by: str,
+                     expires_at: float | None = None) -> bool:
+    try:
+        db = _get_db()
+        db.execute(
+            "INSERT INTO api_tokens (id, name, prefix, token_hash, scopes, "
+            "created_by, created_at, expires_at, revoked) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
+            (token_id, name, prefix, token_hash, scopes, created_by,
+             time.time(), expires_at),
+        )
+        db.commit()
+        return True
+    except Exception:
+        log.exception("Failed to create api token")
+        return False
+
+
+def list_api_tokens(include_revoked: bool = False) -> list[dict]:
+    db = _get_db()
+    q = ("SELECT id, name, prefix, scopes, created_by, created_at, "
+         "last_used_at, expires_at, revoked FROM api_tokens")
+    if not include_revoked:
+        q += " WHERE revoked = 0"
+    q += " ORDER BY created_at DESC"
+    return [dict(r) for r in db.execute(q).fetchall()]
+
+
+def get_api_tokens_by_prefix(prefix: str) -> list[dict]:
+    """All non-revoked tokens sharing this prefix.  Caller bcrypt-verifies."""
+    db = _get_db()
+    rows = db.execute(
+        "SELECT id, name, prefix, token_hash, scopes, created_by, "
+        "expires_at FROM api_tokens WHERE prefix = ? AND revoked = 0",
+        (prefix,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def touch_api_token(token_id: str) -> None:
+    try:
+        db = _get_db()
+        db.execute(
+            "UPDATE api_tokens SET last_used_at = ? WHERE id = ?",
+            (time.time(), token_id),
+        )
+        db.commit()
+    except Exception:
+        log.exception("Failed to update api token last_used_at")
+
+
+def revoke_api_token(token_id: str, requester: str) -> bool:
+    """Revoke a token.  Only the creator (or any admin — caller enforces)
+    should be able to call this.  Returns True iff a row was updated."""
+    db = _get_db()
+    cur = db.execute(
+        "UPDATE api_tokens SET revoked = 1 WHERE id = ? AND revoked = 0 "
+        "AND created_by = ?",
+        (token_id, requester),
+    )
+    db.commit()
+    return cur.rowcount > 0
+
+
+def admin_revoke_api_token(token_id: str) -> bool:
+    db = _get_db()
+    cur = db.execute(
+        "UPDATE api_tokens SET revoked = 1 WHERE id = ? AND revoked = 0",
+        (token_id,),
+    )
     db.commit()
     return cur.rowcount > 0

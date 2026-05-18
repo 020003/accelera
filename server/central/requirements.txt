@@ -1,3 +1,4 @@
 flask==3.0.3
 bcrypt==4.2.1
 gunicorn==23.0.0
+requests==2.32.3

@@ -260,6 +260,9 @@ See [`.env.example`](.env.example) for the full list.
 | `DELETE` | `/api/hosts/<url>` | Remove a host |
 | `PUT` | `/api/hosts/order` | Persist a new host ordering (body: list of URLs) |
 | `GET` / `PUT` | `/api/settings` | Runtime configuration k/v store |
+| `GET` | `/api/costs/models` | Cached cloud-API pricing catalog (`?refresh=1` to force re-pull, v2.4: moved from exporter) |
+| `GET` | `/api/costs/calculate` | Per-model cost for given prompt/completion totals |
+| `GET` / `POST` / `DELETE` | `/api/auth/tokens` | API token CRUD (session-auth) |
 
 **GPU exporter** (proxied as `/api-proxy/<host>:5000/...`)
 
@@ -269,8 +272,6 @@ See [`.env.example`](.env.example) for the full list.
 | `GET` | `/api/health` | Health check |
 | `GET` | `/api/topology` | GPU interconnect topology |
 | `GET` | `/api/fabric/live` | Live NVLink + IB / RoCE TX/RX rates |
-| `GET` | `/api/costs/models` | Cached cloud-API pricing catalog (`?refresh=1` to force re-pull) |
-| `GET` | `/api/costs/calculate` | Per-model cost for given prompt/completion totals |
 | `GET` | `/api/heatmap?metric=utilization&hours=6` | Historical heatmap data |
 | `GET` | `/api/timeline` | AI workload timeline events |
 | `GET` | `/api/tokens/stats?hours=24` | Token usage statistics |
@@ -287,6 +288,78 @@ See [`.env.example`](.env.example) for the full list.
 | `GET` | `/api/benchmarks/results` | Benchmark result history |
 | `GET/PUT` | `/api/alerts/webhook` | Webhook configuration |
 | `POST` | `/api/alerts/webhook/test` | Send test webhook notification |
+
+---
+
+## Public API (v1)
+
+A bearer-token authenticated REST API for Grafana, scripts, CI, and third-party integrations. All endpoints live under `/api/v1` on the central backend and share the same nginx ingress as the dashboard.
+
+### Interactive docs
+
+| URL | Description |
+|---|---|
+| `/api/v1/docs` | Swagger UI — try every endpoint from the browser. Click **Authorize** to paste a bearer token (persists across reloads). |
+| `/api/v1/openapi.json` | OpenAPI 3.1 spec for code generation, Postman, Insomnia, etc. |
+
+### Authentication
+
+Mint a token in the dashboard at **Settings → API Tokens**. Tokens look like `acc_a1b2c3d4...` and are shown exactly once.
+
+```bash
+curl -H "Authorization: Bearer acc_<your-token>" \
+     https://accelera.example.com/api/v1/whoami
+```
+
+Tokens are stored bcrypt-hashed (per-token salt, lookup by 12-char prefix). Revocation is immediate. Optional expiry: 30 d / 90 d / 180 d / 1 y / never. Scopes: `read` (default) or `read:write`.
+
+### Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/v1` | Unauthenticated index of available routes |
+| `GET` | `/api/v1/whoami` | Metadata about the calling token |
+| `GET` | `/api/v1/hosts` | Configured fleet members (user-defined order) |
+| `GET` | `/api/v1/fleet/summary` | Parallel fan-out GPU snapshot + fleet-wide totals |
+| `GET` | `/api/v1/fleet/tokens` | Aggregated LLM token usage (`?hours=1..720`) |
+| `GET` | `/api/v1/costs/models` | Cloud-model pricing catalog |
+| `GET` | `/api/v1/costs/calculate` | `?prompt_tokens=N&completion_tokens=N` → ranked cost table |
+
+### Example: fleet snapshot
+
+```bash
+curl -s -H "Authorization: Bearer acc_..." \
+     https://accelera.example.com/api/v1/fleet/summary | jq '.totals'
+# {
+#   "gpu_count":         32,
+#   "power_w":           8417.5,
+#   "memory_used_mib":   412800,
+#   "memory_total_mib":  2621440,
+#   "connected":         4
+# }
+```
+
+### Example: what would last week's tokens have cost on Claude / GPT-4o?
+
+```bash
+curl -s -H "Authorization: Bearer acc_..." \
+     "https://accelera.example.com/api/v1/fleet/tokens?hours=168" \
+  | jq '.totals'
+# { "prompt_tokens": 12480000, "completion_tokens": 4310000, ... }
+
+curl -s -H "Authorization: Bearer acc_..." \
+     "https://accelera.example.com/api/v1/costs/calculate?prompt_tokens=12480000&completion_tokens=4310000" \
+  | jq '.models[0:3] | map({name, cost_total_usd})'
+# [
+#   { "name": "Llama 3.3 70B",    "cost_total_usd":  4595.04 },
+#   { "name": "DeepSeek V3",      "cost_total_usd":  8109.60 },
+#   { "name": "Claude Haiku 3.5", "cost_total_usd": 27224.00 }
+# ]
+```
+
+### Rate limiting & errors
+
+The API shares the same per-IP rate limiter as the dashboard (default 120 req/min). Standard HTTP codes apply: `401` (missing/invalid bearer), `403` (insufficient scope), `404`, `429`, `5xx`. Error bodies are JSON: `{"error": "..."}`.
 
 ---
 
