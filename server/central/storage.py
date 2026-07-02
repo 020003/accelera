@@ -64,6 +64,20 @@ def init_db():
             revoked INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_api_tokens_prefix ON api_tokens(prefix);
+
+        CREATE TABLE IF NOT EXISTS rate_buckets (
+            ip TEXT PRIMARY KEY,
+            window_start REAL NOT NULL,
+            count INTEGER NOT NULL,
+            updated_at REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS login_failures (
+            ip TEXT PRIMARY KEY,
+            count INTEGER NOT NULL,
+            locked_until REAL NOT NULL DEFAULT 0,
+            last_failure REAL NOT NULL
+        );
     """)
     # Migrate: add `position` to hosts if missing, then seed with rowid
     # order so existing rows keep their original sequence.
@@ -79,6 +93,90 @@ def init_db():
 # ---------------------------------------------------------------------------
 # Users
 # ---------------------------------------------------------------------------
+
+def is_rate_limited(ip: str, limit: int, window_seconds: int, stale_after_seconds: int) -> bool:
+    db = _get_db()
+    now = time.time()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute("DELETE FROM rate_buckets WHERE updated_at < ?", (now - stale_after_seconds,))
+        row = db.execute(
+            "SELECT window_start, count FROM rate_buckets WHERE ip = ?",
+            (ip,),
+        ).fetchone()
+        if row is None or now - row["window_start"] > window_seconds:
+            db.execute(
+                "INSERT OR REPLACE INTO rate_buckets (ip, window_start, count, updated_at) VALUES (?, ?, ?, ?)",
+                (ip, now, 1, now),
+            )
+            db.commit()
+            return False
+        count = int(row["count"]) + 1
+        db.execute(
+            "UPDATE rate_buckets SET count = ?, updated_at = ? WHERE ip = ?",
+            (count, now, ip),
+        )
+        db.commit()
+        return count > limit
+    except Exception:
+        db.rollback()
+        log.exception("Failed to update rate bucket")
+        return False
+
+
+def record_login_failure(ip: str, max_failures: int, lockout_base: int, lockout_max: int) -> None:
+    db = _get_db()
+    now = time.time()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT count FROM login_failures WHERE ip = ?",
+            (ip,),
+        ).fetchone()
+        count = (int(row["count"]) if row else 0) + 1
+        locked_until = 0.0
+        if count >= max_failures:
+            locked_until = now + min(lockout_base * (2 ** (count - max_failures)), lockout_max)
+        db.execute(
+            "INSERT OR REPLACE INTO login_failures (ip, count, locked_until, last_failure) VALUES (?, ?, ?, ?)",
+            (ip, count, locked_until, now),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        log.exception("Failed to record login failure")
+
+
+def clear_login_failures(ip: str) -> None:
+    db = _get_db()
+    try:
+        db.execute("DELETE FROM login_failures WHERE ip = ?", (ip,))
+        db.commit()
+    except Exception:
+        db.rollback()
+        log.exception("Failed to clear login failures")
+
+
+def get_login_lockout(ip: str, stale_after_seconds: int) -> tuple[bool, int]:
+    db = _get_db()
+    now = time.time()
+    try:
+        db.execute("DELETE FROM login_failures WHERE last_failure < ?", (now - stale_after_seconds,))
+        db.commit()
+        row = db.execute(
+            "SELECT locked_until FROM login_failures WHERE ip = ?",
+            (ip,),
+        ).fetchone()
+        if row is None:
+            return False, 0
+        remaining = float(row["locked_until"]) - now
+        if remaining > 0:
+            return True, int(remaining) + 1
+        return False, 0
+    except Exception:
+        log.exception("Failed to read login lockout")
+        return False, 0
+
 
 def get_user(username: str) -> dict | None:
     db = _get_db()

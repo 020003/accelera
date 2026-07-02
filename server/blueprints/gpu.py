@@ -316,6 +316,43 @@ def _read_cmdline(pid: int) -> str:
     return ""
 
 
+def _read_parent_pid(pid: int) -> int:
+    for root in ("/host/proc", "/proc"):
+        try:
+            with open(f"{root}/{pid}/status") as f:
+                for line in f:
+                    if line.startswith("PPid:"):
+                        return int(line.split()[1])
+        except (OSError, PermissionError, ValueError, IndexError):
+            continue
+    return 0
+
+
+def _cli_values(cmdline: str, flag: str) -> list[str]:
+    parts = cmdline.split()
+    values: list[str] = []
+    for idx, part in enumerate(parts):
+        if part != flag:
+            continue
+        for value in parts[idx + 1:]:
+            if value.startswith("--"):
+                break
+            values.append(value)
+        break
+    return values
+
+
+def _extract_vllm_model(cmdline: str) -> str:
+    served_names = _cli_values(cmdline, "--served-model-name")
+    if served_names:
+        return ", ".join(served_names)
+    model_values = _cli_values(cmdline, "--model")
+    if model_values:
+        model = model_values[0].strip(" /\\")
+        return model if "/" in model and not model.startswith("/") else os.path.basename(model)
+    return ""
+
+
 def _enrich_processes(gpus: list[dict]):
     """Post-process: resolve names, detect runtime & model for each process."""
     has_ai = False
@@ -338,6 +375,10 @@ def _enrich_processes(gpus: list[dict]):
                     break
             proc["runtime"] = runtime
 
+            if runtime == "vLLM":
+                parent_cmdline = _read_cmdline(_read_parent_pid(pid))
+                proc["model"] = _extract_vllm_model(parent_cmdline) or _extract_vllm_model(cmdline)
+
             # Category
             proc["category"] = "ai" if _AI_RE.search(f"{proc['name']} {cmdline}") else "other"
 
@@ -356,7 +397,9 @@ def _enrich_processes(gpus: list[dict]):
     for gpu in gpus:
         for proc in gpu.get("processes", []):
             rt = proc.get("runtime", "")
-            model = ""
+            model = proc.get("model", "")
+            if model:
+                continue
             if rt == "Ollama" and ollama_models:
                 mem = proc.get("memory", 0)
                 best, best_diff = None, float("inf")

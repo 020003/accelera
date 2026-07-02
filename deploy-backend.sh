@@ -1,5 +1,7 @@
 #!/bin/bash
 
+REMOTE_USER="${REMOTE_USER:-$(whoami)}"
+
 # Backend hosts — read from env var, .gpu-hosts file, or command-line args
 if [ $# -gt 0 ]; then
     HOSTS=("$@")
@@ -28,19 +30,19 @@ for host in "${HOSTS[@]}"; do
     
     # Copy necessary files
     echo "Copying files to ${host}..."
-    ssh labadmin@${host} "mkdir -p ~/gpu-dash-glow/server"
-    scp -r server/* labadmin@${host}:~/gpu-dash-glow/server/
-    scp docker-compose.gpu-exporter.yml labadmin@${host}:~/gpu-dash-glow/
+    ssh ${REMOTE_USER}@${host} "mkdir -p ~/gpu-dash-glow/server"
+    scp -r server/* ${REMOTE_USER}@${host}:~/gpu-dash-glow/server/
+    scp docker-compose.gpu-exporter.yml ${REMOTE_USER}@${host}:~/gpu-dash-glow/
     
     # Deploy with docker-compose
     echo "Starting Docker container on ${host}..."
-    ssh labadmin@${host} "cd ~/gpu-dash-glow && docker-compose -f docker-compose.gpu-exporter.yml down"
-    ssh labadmin@${host} "cd ~/gpu-dash-glow && docker-compose -f docker-compose.gpu-exporter.yml up -d --build"
+    ssh ${REMOTE_USER}@${host} "cd ~/gpu-dash-glow && docker-compose -f docker-compose.gpu-exporter.yml down"
+    ssh ${REMOTE_USER}@${host} "cd ~/gpu-dash-glow && docker-compose -f docker-compose.gpu-exporter.yml up -d --build"
     
     # Check deployment status
     echo "Checking deployment status on ${host}..."
     sleep 5
-    if ssh labadmin@${host} "curl -s http://localhost:5000/api/health > /dev/null 2>&1"; then
+    if ssh ${REMOTE_USER}@${host} "curl -s http://localhost:5000/api/health > /dev/null 2>&1"; then
         echo -e "${GREEN}✓ Backend successfully deployed on ${host}${NC}"
     else
         echo -e "${RED}✗ Backend deployment may have issues on ${host}${NC}"

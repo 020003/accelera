@@ -1,14 +1,8 @@
-"""Central backend middleware: rate limiting and login lockout.
-
-In-memory token-bucket per IP for general rate limiting.
-Separate stricter limit + exponential backoff for auth endpoints.
-"""
-
-import threading
-import time
-from collections import defaultdict
+"""Central backend middleware: rate limiting and login lockout."""
 
 from flask import Flask, jsonify, request
+
+import storage
 
 # ---------------------------------------------------------------------------
 # General rate limiter (token-bucket per IP)
@@ -17,28 +11,9 @@ _RATE = 120          # requests per window
 _WINDOW = 60         # seconds
 _CLEANUP = 300       # prune stale entries every 5 min
 
-_lock = threading.Lock()
-_buckets: dict[str, list] = defaultdict(lambda: [0, 0.0])  # [count, window_start]
-_last_cleanup = 0.0
-
 
 def _rate_limited(ip: str) -> bool:
-    global _last_cleanup
-    now = time.monotonic()
-    with _lock:
-        if now - _last_cleanup > _CLEANUP:
-            stale = [k for k, v in _buckets.items() if now - v[1] > _WINDOW * 2]
-            for k in stale:
-                del _buckets[k]
-            _last_cleanup = now
-
-        bucket = _buckets[ip]
-        if now - bucket[1] > _WINDOW:
-            bucket[0] = 1
-            bucket[1] = now
-            return False
-        bucket[0] += 1
-        return bucket[0] > _RATE
+    return storage.is_rate_limited(ip, _RATE, _WINDOW, _CLEANUP)
 
 
 # ---------------------------------------------------------------------------
@@ -49,47 +24,18 @@ _LOCKOUT_BASE = 30         # base lockout seconds (doubles each time)
 _LOCKOUT_MAX = 900         # max lockout: 15 minutes
 _LOCKOUT_CLEANUP = 600     # prune stale entries every 10 min
 
-_login_lock = threading.Lock()
-_login_failures: dict[str, dict] = {}  # ip -> {count, locked_until, last_failure}
-_login_last_cleanup = 0.0
-
 
 def record_login_failure(ip: str) -> None:
-    now = time.monotonic()
-    with _login_lock:
-        entry = _login_failures.setdefault(ip, {"count": 0, "locked_until": 0, "last_failure": 0})
-        entry["count"] += 1
-        entry["last_failure"] = now
-        if entry["count"] >= _MAX_FAILURES:
-            backoff = min(_LOCKOUT_BASE * (2 ** (entry["count"] - _MAX_FAILURES)), _LOCKOUT_MAX)
-            entry["locked_until"] = now + backoff
+    storage.record_login_failure(ip, _MAX_FAILURES, _LOCKOUT_BASE, _LOCKOUT_MAX)
 
 
 def clear_login_failures(ip: str) -> None:
-    with _login_lock:
-        _login_failures.pop(ip, None)
+    storage.clear_login_failures(ip)
 
 
 def is_login_locked(ip: str) -> tuple[bool, int]:
     """Return (locked, seconds_remaining)."""
-    now = time.monotonic()
-    with _login_lock:
-        # Periodic cleanup
-        global _login_last_cleanup
-        if now - _login_last_cleanup > _LOCKOUT_CLEANUP:
-            stale = [k for k, v in _login_failures.items()
-                     if now - v["last_failure"] > _LOCKOUT_MAX * 2]
-            for k in stale:
-                del _login_failures[k]
-            _login_last_cleanup = now
-
-        entry = _login_failures.get(ip)
-        if not entry:
-            return False, 0
-        remaining = entry["locked_until"] - now
-        if remaining > 0:
-            return True, int(remaining) + 1
-        return False, 0
+    return storage.get_login_lockout(ip, _LOCKOUT_CLEANUP)
 
 
 # ---------------------------------------------------------------------------

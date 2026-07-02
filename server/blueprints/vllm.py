@@ -93,29 +93,67 @@ def _probe_vllm(base_url: str, timeout_s: float) -> dict | None:
         return None
 
 
+def _combine_results(results: list[dict]) -> dict:
+    models: list[dict] = []
+    seen_models: set[str] = set()
+    instances = []
+    for result in results:
+        result_models = result.get("models", [])
+        primary_model = result_models[0] if result_models else None
+        if primary_model:
+            model_id = primary_model.get("id", "")
+            if model_id and model_id not in seen_models:
+                seen_models.add(model_id)
+                models.append(primary_model)
+        instances.append({
+            "vllmUrl": result.get("vllmUrl"),
+            "version": result.get("version", "unknown"),
+            "models": result_models,
+            "primaryModel": primary_model,
+        })
+    return {
+        "isAvailable": True,
+        "vllmUrl": results[0].get("vllmUrl"),
+        "vllmUrls": [r.get("vllmUrl") for r in results if r.get("vllmUrl")],
+        "instances": instances,
+        "models": models,
+        "version": results[0].get("version", "unknown"),
+        "statistics": {"totalModels": len(models), "totalInstances": len(instances)},
+    }
+
+
 def check_vllm_availability(host_url: str) -> dict:
-    """Check if a vLLM server is reachable on a host.
-
-    If ``VLLM_URL`` is configured, it is used directly (no port scanning).
-    Otherwise, common ports are probed on the same hostname as *host_url*.
-    """
+    """Check if one or more vLLM servers are reachable on a host."""
     timeout_s = VLLM_DISCOVER_TIMEOUT / 1000
+    results: list[dict] = []
+    seen_urls: set[str] = set()
+    seen_ports: set[int] = set()
 
-    # --- Explicit URL (preferred) ---
+    def add_result(base_url: str) -> None:
+        parsed_url = urlparse(base_url)
+        port = parsed_url.port
+        if base_url in seen_urls or (port is not None and port in seen_ports):
+            return
+        seen_urls.add(base_url)
+        result = _probe_vllm(base_url, timeout_s)
+        if result:
+            if port is not None:
+                seen_ports.add(port)
+            results.append(result)
+
     global _vllm_url_warned
     if VLLM_URL:
         log.debug("VLLM_URL configured: %s", VLLM_URL)
-        result = _probe_vllm(VLLM_URL.rstrip("/"), timeout_s)
-        if result:
+        before = len(results)
+        add_result(VLLM_URL.rstrip("/"))
+        if len(results) > before:
             _vllm_url_warned = False
-            return result
-        if not _vllm_url_warned:
+        elif not _vllm_url_warned:
             log.warning("VLLM_URL=%s did not respond – falling back to port scan", VLLM_URL)
             _vllm_url_warned = True
         else:
             log.debug("VLLM_URL=%s still unreachable", VLLM_URL)
 
-    # --- Auto-discover via port probe ---
     try:
         parsed = urlparse(host_url)
         hostname = parsed.hostname
@@ -125,10 +163,6 @@ def check_vllm_availability(host_url: str) -> dict:
             [str(VLLM_DEFAULT_PORT)] + _PROBE_PORTS + [str(parsed.port or "5000")]
         ))
 
-        # Build list of hostnames to scan.  When running inside a
-        # container, localhost won't reach host services – also probe
-        # host.docker.internal.  Similarly, if VLLM_URL pointed to a
-        # specific hostname, scan all ports on that hostname too.
         hostnames: list[str] = [hostname] if hostname else ["localhost"]
         if hostname in ("localhost", "127.0.0.1"):
             hostnames.append("host.docker.internal")
@@ -139,14 +173,15 @@ def check_vllm_availability(host_url: str) -> dict:
 
         for h in hostnames:
             for port in ports:
-                result = _probe_vllm(f"{scheme}://{h}:{port}", timeout_s)
-                if result:
+                base_url = f"{scheme}://{h}:{port}"
+                before = len(results)
+                add_result(base_url)
+                if len(results) > before:
                     log.info("vLLM auto-discovered on %s:%s", h, port)
-                    return result
 
-        return {"isAvailable": False}
+        return _combine_results(results) if results else {"isAvailable": False}
     except Exception:
-        return {"isAvailable": False}
+        return _combine_results(results) if results else {"isAvailable": False}
 
 
 @vllm_bp.route("/api/vllm/discover", methods=["POST"])

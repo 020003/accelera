@@ -1,8 +1,8 @@
 /**
  * Rewrite an absolute GPU-exporter URL to go through the nginx reverse proxy.
  *
- * Converts: http://10.2.63.234:5000/nvidia-smi.json
- *       To: /api-proxy/10.2.63.234:5000/nvidia-smi.json
+ * Converts: http://10.0.0.13:5000/nvidia-smi.json
+ *       To: /api-proxy/10.0.0.13:5000/nvidia-smi.json
  *
  * This keeps backend IPs out of browser CORS preflight and lets the
  * frontend work behind firewalls that only expose port 8080.
@@ -26,7 +26,7 @@ export function proxyUrl(url: string): string {
       return url;
     }
     // Strip scheme, keep host:port + path + query
-    const hostPort = parsed.host; // e.g. "10.2.63.234:5000"
+    const hostPort = parsed.host; // e.g. "10.0.0.13:5000"
     const rest = parsed.pathname + parsed.search + parsed.hash;
     // Remove leading slash from rest so the nginx regex matches cleanly
     const trimmed = rest.startsWith("/") ? rest.slice(1) : rest;

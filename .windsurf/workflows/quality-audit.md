@@ -69,7 +69,7 @@ python3 -m py_compile server/app.py && python3 -m py_compile server/storage.py &
 // turbo
 ```bash
 # Health check all GPU hosts
-for host in 10.2.15.99 10.2.63.234 10.2.3.31; do
+for host in $(grep -v '^\s*#' .gpu-hosts); do
   curl -sf "http://$host:5000/health" | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'$host: {d[\"status\"]}')" 2>/dev/null || echo "$host: FAIL"
 done
 ```

@@ -149,7 +149,7 @@ describe('HostManager', () => {
       
       render(<HostManager {...defaultProps} hosts={[host]} />);
       
-      const removeButton = screen.getByRole('button', { name: '' });
+      const removeButton = screen.getByTitle('Remove host');
       fireEvent.click(removeButton);
 
       await waitFor(() => {
@@ -174,7 +174,7 @@ describe('HostManager', () => {
       
       render(<HostManager {...defaultProps} hosts={[host]} />);
       
-      const removeButton = screen.getByRole('button', { name: '' });
+      const removeButton = screen.getByTitle('Remove host');
       fireEvent.click(removeButton);
 
       await waitFor(() => {

@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Helmet } from "react-helmet-async";
-import { useNvidiaSmi } from "@/hooks/useNvidiaSmi";
+import { useFleetHosts } from "@/hooks/useFleetHosts";
 import { useTopology } from "@/hooks/useTopology";
 import { MultiHostOverview } from "@/components/MultiHostOverview";
 import { HostTab } from "@/components/HostTab";
@@ -19,11 +19,19 @@ import { CostAnalysisTab } from "@/components/CostAnalysisTab";
 import { TabErrorBoundary } from "@/components/TabErrorBoundary";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
-import type { NvidiaSmiResponse } from "@/types/gpu";
-import type { Host, HostData } from "@/types/dashboard";
 import { proxyUrl } from "@/lib/proxy";
 import { useTheme } from "@/hooks/useTheme";
 
+interface HeatmapResponse {
+  hosts?: unknown[];
+  timestamps?: unknown[];
+  metrics?: {
+    utilization?: unknown[];
+    temperature?: unknown[];
+    power?: unknown[];
+    memory?: unknown[];
+  };
+}
 
 export default function Dashboard() {
   // Load settings from localStorage
@@ -38,56 +46,16 @@ export default function Dashboard() {
   );
   const { currency, setCurrency } = useCurrency();
   const { theme, toggle: toggleTheme } = useTheme();
-  const [hosts, setHosts] = useState<Host[]>([]);
-  const [hostsLoaded, setHostsLoaded] = useState(false);
-  const [hostsData, setHostsData] = useState<HostData[]>([]);
+  const { hosts, setHosts, hostsData, fetchAllHostsData } = useFleetHosts({ demo, refreshInterval });
   const [activeTab, setActiveTab] = useState("overview");
   const { data: topologyData } = useTopology();
   const [heatmapData, setHeatmapData] = useState(null);
   const [advancedDataLoaded, setAdvancedDataLoaded] = useState(false);
   const [heatmapHours, setHeatmapHours] = useState(6);
   const [vizRefreshing, setVizRefreshing] = useState(false);
-  const [ollamaStatus, setOllamaStatus] = useState<Record<string, any>>({});
-  const [sglangStatus, setSglangStatus] = useState<Record<string, any>>({});
-  const [vllmStatus, setVllmStatus] = useState<Record<string, any>>({});
-
-  // Load hosts from central backend on mount
-  useEffect(() => {
-    fetch("/api/hosts", { credentials: "include" })
-      .then((res) => {
-        if (!res.ok) throw new Error(`${res.status}`);
-        return res.json();
-      })
-      .then((data: Array<{ url: string; name: string }>) => {
-        if (Array.isArray(data)) {
-          setHosts(data.map((h) => ({ url: h.url, name: h.name, isConnected: false })));
-        }
-      })
-      .catch(() => {})
-      .finally(() => setHostsLoaded(true));
-  }, []);
-  
-  // Create a Map for the PowerUsageChart
   const hostDataMap = new Map(
     hostsData.map(host => [host.url, { gpus: host.gpus, timestamp: host.timestamp }])
   );
-
-  // INVARIANT: `hosts[i].isConnected` always equals
-  // `hostsData.find(d => d.url === hosts[i].url)?.isConnected ?? false`.
-  // Maintained by `syncHostsConnection()` called after every poll.
-  // Consumers can read `.isConnected` from either array safely.
-  //
-  // A proper unification into a single useFleetHosts() hook is tracked
-  // as R-1 in docs/REFACTOR_BACKLOG.md; this is the minimal correctness
-  // fix that eliminates the drift bug class without rewriting consumers.
-  
-
-  // Demo mode API query
-  const { data: demoData, isError: demoError, isFetching: demoFetching } = useNvidiaSmi({
-    apiUrl: null,
-    demo: demo,
-    refetchIntervalMs: demo ? refreshInterval : 0
-  });
 
 
   // Helper function to fetch advanced visualization data from GPU hosts (lazy-loaded)
@@ -111,7 +79,7 @@ export default function Dashboard() {
             { signal: timeoutController.signal }
           ).catch(() => null);
 
-          const results: { host: string; heatmap: any } = { host: host.name, heatmap: null };
+          const results: { host: string; heatmap: HeatmapResponse | null } = { host: host.name, heatmap: null };
 
           if (heatmapResponse?.ok) {
             results.heatmap = await heatmapResponse.json();
@@ -150,447 +118,6 @@ export default function Dashboard() {
     }
   };
 
-  // Helper function to check if Ollama is available on a host
-  const checkOllamaAvailability = async (hostUrl: string) => {
-    try {
-      // Extract the base URL from the host URL (remove the /nvidia-smi.json path)
-      const url = new URL(hostUrl);
-      const baseUrl = `${url.protocol}//${url.host}`;
-      
-      // Call the Ollama discovery endpoint directly on the GPU host
-      const response = await fetch(proxyUrl(`${baseUrl}/api/ollama/discover`), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ hostUrl: baseUrl }),
-        signal: AbortSignal.timeout(3000) // 3 second timeout for faster initial load
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        
-        if (result.isAvailable) {
-          return result;
-        }
-      }
-      
-      return { isAvailable: false };
-    } catch (error) {
-      return { isAvailable: false };
-    }
-  };
-
-  // Helper function to check if vLLM is available on a host
-  const checkVllmAvailability = async (hostUrl: string) => {
-    try {
-      const url = new URL(hostUrl);
-      const baseUrl = `${url.protocol}//${url.host}`;
-      
-      const response = await fetch(proxyUrl(`${baseUrl}/api/vllm/discover`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hostUrl: baseUrl }),
-        signal: AbortSignal.timeout(3000)
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        if (result.isAvailable) return result;
-      }
-      
-      return { isAvailable: false };
-    } catch {
-      return { isAvailable: false };
-    }
-  };
-
-  // Helper function to check if SGLang is available on a host
-  const checkSglangAvailability = async (hostUrl: string) => {
-    try {
-      const url = new URL(hostUrl);
-      const baseUrl = `${url.protocol}//${url.host}`;
-      
-      const response = await fetch(proxyUrl(`${baseUrl}/api/sglang/discover`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hostUrl: baseUrl }),
-        signal: AbortSignal.timeout(3000)
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        if (result.isAvailable) return result;
-      }
-      
-      return { isAvailable: false };
-    } catch {
-      return { isAvailable: false };
-    }
-  };
-
-  // Helper function to fetch data from a host
-  const fetchHostData = async (host: Host): Promise<HostData> => {
-    try {
-      const response = await fetch(proxyUrl(host.url));
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      const data = await response.json() as NvidiaSmiResponse;
-      
-      const hostData = {
-        url: host.url,
-        name: host.name,
-        isConnected: true,
-        gpus: data.gpus || [],
-        timestamp: data.timestamp,
-        error: undefined,
-        ollama: undefined
-      };
-
-      // Check for Ollama availability (with caching to avoid flickering)
-      const hostKey = host.url;
-      const cachedOllamaStatus = ollamaStatus[hostKey];
-      const now = Date.now();
-      
-      // Only check Ollama if we don't have cached data or it's older than 5 minutes
-      if (!cachedOllamaStatus || (now - cachedOllamaStatus.lastChecked) > 300000) {
-        checkOllamaAvailability(host.url).then(ollamaInfo => {
-          const newOllamaStatus = {
-            ...ollamaInfo,
-            lastChecked: now
-          };
-          
-          // Cache the result
-          setOllamaStatus(prev => ({
-            ...prev,
-            [hostKey]: newOllamaStatus
-          }));
-          
-          if (ollamaInfo.isAvailable) {
-            // Update the host data with Ollama info when available
-            setHostsData(prevData => 
-              prevData.map(h => 
-                h.url === host.url 
-                  ? { 
-                      ...h, 
-                      ollama: {
-                        isAvailable: true,
-                        models: ollamaInfo.models || [],
-                        performanceMetrics: ollamaInfo.performanceMetrics || {
-                          tokensPerSecond: 0,
-                          modelLoadTimeMs: 0,
-                          totalDurationMs: 0,
-                          promptProcessingMs: 0,
-                          averageLatency: 0,
-                          requestCount: 0,
-                          errorCount: 0
-                        },
-                        recentRequests: ollamaInfo.recentRequests || []
-                      }
-                    }
-                  : h
-              )
-            );
-          }
-        }).catch(() => {
-          // Cache the failure too
-          setOllamaStatus(prev => ({
-            ...prev,
-            [hostKey]: {
-              isAvailable: false,
-              lastChecked: now
-            }
-          }));
-        });
-      } else if (cachedOllamaStatus.isAvailable) {
-        // Use cached Ollama data
-        setHostsData(prevData => 
-          prevData.map(h => 
-            h.url === host.url 
-              ? { 
-                  ...h, 
-                  ollama: {
-                    isAvailable: true,
-                    models: cachedOllamaStatus.models || [],
-                    performanceMetrics: cachedOllamaStatus.performanceMetrics || {
-                      tokensPerSecond: 0,
-                      modelLoadTimeMs: 0,
-                      totalDurationMs: 0,
-                      promptProcessingMs: 0,
-                      averageLatency: 0,
-                      requestCount: 0,
-                      errorCount: 0
-                    },
-                    recentRequests: cachedOllamaStatus.recentRequests || []
-                  }
-                }
-              : h
-          )
-        );
-      }
-      
-      // Check for SGLang availability (same caching pattern as Ollama)
-      const cachedSglangStatus = sglangStatus[hostKey];
-      
-      if (!cachedSglangStatus || (now - cachedSglangStatus.lastChecked) > 300000) {
-        checkSglangAvailability(host.url).then(sglangInfo => {
-          const newSglangStatus = { ...sglangInfo, lastChecked: now };
-          
-          setSglangStatus(prev => ({ ...prev, [hostKey]: newSglangStatus }));
-          
-          if (sglangInfo.isAvailable) {
-            setHostsData(prevData => 
-              prevData.map(h => 
-                h.url === host.url 
-                  ? { 
-                      ...h, 
-                      sglang: {
-                        isAvailable: true,
-                        models: sglangInfo.models || [],
-                        sglangUrl: sglangInfo.sglangUrl,
-                        serverInfo: sglangInfo.serverInfo,
-                      }
-                    }
-                  : h
-              )
-            );
-          }
-        }).catch(() => {
-          setSglangStatus(prev => ({
-            ...prev,
-            [hostKey]: { isAvailable: false, lastChecked: now }
-          }));
-        });
-      } else if (cachedSglangStatus.isAvailable) {
-        setHostsData(prevData => 
-          prevData.map(h => 
-            h.url === host.url 
-              ? { 
-                  ...h, 
-                  sglang: {
-                    isAvailable: true,
-                    models: cachedSglangStatus.models || [],
-                    sglangUrl: cachedSglangStatus.sglangUrl,
-                    serverInfo: cachedSglangStatus.serverInfo,
-                  }
-                }
-              : h
-          )
-        );
-      }
-
-      // Check for vLLM availability (same caching pattern)
-      const cachedVllmStatus = vllmStatus[hostKey];
-      
-      if (!cachedVllmStatus || (now - cachedVllmStatus.lastChecked) > 300000) {
-        checkVllmAvailability(host.url).then(vllmInfo => {
-          const newVllmStatus = { ...vllmInfo, lastChecked: now };
-          
-          setVllmStatus(prev => ({ ...prev, [hostKey]: newVllmStatus }));
-          
-          if (vllmInfo.isAvailable) {
-            setHostsData(prevData => 
-              prevData.map(h => 
-                h.url === host.url 
-                  ? { 
-                      ...h, 
-                      vllm: {
-                        isAvailable: true,
-                        models: vllmInfo.models || [],
-                        vllmUrl: vllmInfo.vllmUrl,
-                        version: vllmInfo.version,
-                      }
-                    }
-                  : h
-              )
-            );
-          }
-        }).catch(() => {
-          setVllmStatus(prev => ({
-            ...prev,
-            [hostKey]: { isAvailable: false, lastChecked: now }
-          }));
-        });
-      } else if (cachedVllmStatus.isAvailable) {
-        setHostsData(prevData => 
-          prevData.map(h => 
-            h.url === host.url 
-              ? { 
-                  ...h, 
-                  vllm: {
-                    isAvailable: true,
-                    models: cachedVllmStatus.models || [],
-                    vllmUrl: cachedVllmStatus.vllmUrl,
-                    version: cachedVllmStatus.version,
-                  }
-                }
-              : h
-          )
-        );
-      }
-
-      return hostData;
-    } catch (error) {
-      return {
-        url: host.url,
-        name: host.name,
-        isConnected: false,
-        gpus: [],
-        error: error instanceof Error ? error.message : "Unknown error"
-      };
-    }
-  };
-
-  // Guard against concurrent fetches — if a cycle is still in-flight,
-  // skip the next tick rather than piling up parallel requests.
-  const fetchInProgress = useRef(false);
-
-  // Fetch data from all hosts
-  const fetchAllHostsData = async () => {
-    if (fetchInProgress.current) return;
-    fetchInProgress.current = true;
-    try {
-    if (demo) {
-      // Demo mode - use demo data for overview
-      const demoParsed = demoData as NvidiaSmiResponse | undefined;
-      setHostsData([{
-        url: "demo",
-        name: "Demo Host",
-        isConnected: !demoError,
-        gpus: demoParsed?.gpus || [],
-        timestamp: demoParsed?.timestamp,
-        error: demoError ? "Demo mode error" : undefined
-      }]);
-      return;
-    }
-
-    if (hosts.length === 0) {
-      setHostsData([]);
-      return;
-    }
-
-    const results = await Promise.all(hosts.map(fetchHostData));
-    
-    // Smart update - only update if data actually changed
-    setHostsData(prevData => {
-      const newData = [...prevData];
-      let hasChanges = false;
-      
-      results.forEach((newHostData) => {
-        const existingIndex = newData.findIndex(h => h.url === newHostData.url);
-        
-        if (existingIndex >= 0) {
-          const existing = newData[existingIndex];
-          
-          // Only update if there are meaningful changes
-          const gpusChanged = existing.gpus.length !== newHostData.gpus.length ||
-            existing.gpus.some((gpu, i) => {
-              const newGpu = newHostData.gpus[i];
-              return !newGpu || 
-                gpu.utilization !== newGpu.utilization ||
-                gpu.temperature !== newGpu.temperature ||
-                gpu.power.draw !== newGpu.power.draw ||
-                gpu.memory.used !== newGpu.memory.used;
-            });
-          
-          if (
-            existing.isConnected !== newHostData.isConnected ||
-            existing.error !== newHostData.error ||
-            existing.timestamp !== newHostData.timestamp ||
-            gpusChanged ||
-            (!existing.ollama && newHostData.ollama) // Only add ollama if it wasn't there before
-          ) {
-            newData[existingIndex] = {
-              ...existing,
-              ...newHostData,
-              // Preserve ollama/sglang/vllm data if it exists and new data doesn't have it
-              ollama: newHostData.ollama || existing.ollama,
-              sglang: newHostData.sglang || existing.sglang,
-              vllm: newHostData.vllm || existing.vllm
-            };
-            hasChanges = true;
-          }
-        } else {
-          // New host
-          newData.push(newHostData);
-          hasChanges = true;
-        }
-      });
-      
-      // Remove hosts that no longer exist
-      const filteredData = newData.filter(hostData => 
-        results.some(r => r.url === hostData.url)
-      );
-      
-      if (filteredData.length !== newData.length) {
-        hasChanges = true;
-      }
-
-      // Keep hostsData in the same order as the hosts state so that
-      // user-driven reordering (drag-and-drop in Settings) propagates
-      // to the tab list, overview, and any other consumer that maps
-      // over hostsData.
-      const orderIndex = new Map<string, number>(results.map((r, i) => [r.url, i]));
-      const sorted = [...filteredData].sort(
-        (a, b) => (orderIndex.get(a.url) ?? 0) - (orderIndex.get(b.url) ?? 0),
-      );
-      const orderChanged = sorted.some((h, i) => h.url !== filteredData[i]?.url);
-      if (orderChanged) hasChanges = true;
-
-      return hasChanges ? sorted : prevData;
-    });
-
-    // Maintain the invariant: hosts[i].isConnected mirrors the live
-    // poll result.  `hostsKey` (the polling effect's dep) memoises on
-    // URL value, not array identity, so this does NOT re-fire the
-    // polling effect.  This eliminates the drift bug class that caused
-    // the v2.3 power-chart regression.
-    setHosts((prev) => {
-      const liveByUrl = new Map<string, boolean>(
-        results.map((r) => [r.url, r.isConnected]),
-      );
-      let mutated = false;
-      const next = prev.map((h) => {
-        const live = liveByUrl.get(h.url) ?? false;
-        if (h.isConnected !== live) {
-          mutated = true;
-          return { ...h, isConnected: live };
-        }
-        return h;
-      });
-      return mutated ? next : prev;
-    });
-    } finally {
-      fetchInProgress.current = false;
-    }
-  };
-
-  // Stable key: only changes when the set of host URLs changes, NOT on
-  // isConnected flips. This prevents the infinite re-fetch loop where
-  // connection-status changes re-trigger the effect immediately.
-  const hostsKey = useMemo(
-    () => hosts.map((h) => h.url).sort().join(","),
-    [hosts]
-  );
-
-  // Keep a ref to the fetch function so the interval always calls the
-  // latest closure without the effect needing to depend on every piece
-  // of state that fetchAllHostsData reads.
-  const fetchRef = useRef(fetchAllHostsData);
-  fetchRef.current = fetchAllHostsData;
-
-  // Auto-refresh data
-  useEffect(() => {
-    if (demo || hostsKey.length > 0) {
-      fetchRef.current();
-      
-      if (refreshInterval > 0) {
-        const interval = setInterval(() => fetchRef.current(), refreshInterval);
-        return () => clearInterval(interval);
-      }
-    }
-  }, [hostsKey, demo, refreshInterval]);
 
   // Lazy load advanced visualization data when needed
   useEffect(() => {

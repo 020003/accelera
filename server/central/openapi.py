@@ -73,7 +73,7 @@ def _spec() -> dict:
                     "type": "object",
                     "required": ["url", "name"],
                     "properties": {
-                        "url":        {"type": "string", "example": "http://10.2.3.31:5000/nvidia-smi.json"},
+                        "url":        {"type": "string", "example": "http://10.0.0.11:5000/nvidia-smi.json"},
                         "name":       {"type": "string", "example": "Server 1"},
                         "created_at": {"type": "string", "example": "2026-04-18T09:12:33Z"},
                     },

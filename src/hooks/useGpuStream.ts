@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import type { NvidiaSmiResponse } from "@/types/gpu";
 
 interface UseGpuStreamOptions {
-  /** Base URL of the backend, e.g. "http://10.2.63.234:5000" */
+  /** Base URL of the backend, e.g. "http://10.0.0.13:5000" */
   url?: string;
   /** Whether to enable the stream */
   enabled?: boolean;

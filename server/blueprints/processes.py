@@ -116,6 +116,43 @@ def _read_cmdline(pid: int) -> str:
     return ""
 
 
+def _read_parent_pid(pid: int) -> int:
+    for proc_root in ("/host/proc", "/proc"):
+        try:
+            with open(f"{proc_root}/{pid}/status") as f:
+                for line in f:
+                    if line.startswith("PPid:"):
+                        return int(line.split()[1])
+        except (OSError, PermissionError, ValueError, IndexError):
+            continue
+    return 0
+
+
+def _cli_values(cmdline: str, flag: str) -> list[str]:
+    parts = cmdline.split()
+    values: list[str] = []
+    for idx, part in enumerate(parts):
+        if part != flag:
+            continue
+        for value in parts[idx + 1:]:
+            if value.startswith("--"):
+                break
+            values.append(value)
+        break
+    return values
+
+
+def _extract_vllm_model(cmdline: str) -> str:
+    served_names = _cli_values(cmdline, "--served-model-name")
+    if served_names:
+        return ", ".join(served_names)
+    model_values = _cli_values(cmdline, "--model")
+    if model_values:
+        model = model_values[0].strip(" /\\")
+        return model if "/" in model and not model.startswith("/") else os.path.basename(model)
+    return ""
+
+
 def _read_user(pid: int) -> str:
     for proc_root in ("/host/proc", "/proc"):
         try:
@@ -227,6 +264,13 @@ def _match_model_to_process(proc: dict, ollama_models: list[dict], sglang_models
     """Try to match a running AI model name to a process."""
     runtime = proc.get("runtime", "")
     mem_mib = proc.get("memory", 0)
+
+    if runtime == "vLLM":
+        pid = proc.get("pid", 0)
+        parent_cmdline = _read_cmdline(_read_parent_pid(pid))
+        model = _extract_vllm_model(parent_cmdline) or _extract_vllm_model(proc.get("cmdline", ""))
+        if model:
+            return model
 
     if runtime == "Ollama" and ollama_models:
         # Match by VRAM size (closest match)
