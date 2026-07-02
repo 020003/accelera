@@ -300,6 +300,12 @@ export default function Dashboard() {
                 isFetching={false}
                 error={host.error}
                 timestamp={host.timestamp}
+                snapshotSource={host.snapshotSource}
+                stale={host.stale}
+                fetchedAt={host.fetchedAt}
+                lastSuccessAt={host.lastSuccessAt}
+                fetchDurationMs={host.fetchDurationMs}
+                cacheAgeSeconds={host.cacheAgeSeconds}
                 energyRate={energyRate}
                 currencySymbol={currency.symbol}
                 onRefresh={fetchAllHostsData}

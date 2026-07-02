@@ -6,6 +6,13 @@ export interface Host {
   isConnected: boolean;
 }
 
+export interface RuntimeModel {
+  id?: string;
+  name?: string;
+  size?: number;
+  [key: string]: unknown;
+}
+
 export interface HostData {
   url: string;
   name: string;
@@ -13,22 +20,30 @@ export interface HostData {
   gpus: GpuInfo[];
   timestamp?: string;
   error?: string;
+  snapshotSource?: string;
+  stale?: boolean;
+  fetchedAt?: number;
+  lastSuccessAt?: number;
+  fetchDurationMs?: number;
+  cacheAgeSeconds?: number;
   ollama?: {
     isAvailable: boolean;
-    models: any[];
-    performanceMetrics: any;
-    recentRequests: any[];
+    models: RuntimeModel[];
+    performanceMetrics: unknown;
+    recentRequests: unknown[];
   };
   sglang?: {
     isAvailable: boolean;
-    models: any[];
+    models: RuntimeModel[];
     sglangUrl?: string;
-    serverInfo?: any;
+    serverInfo?: unknown;
   };
   vllm?: {
     isAvailable: boolean;
-    models: any[];
+    models: RuntimeModel[];
     vllmUrl?: string;
+    vllmUrls?: string[];
     version?: string;
+    instances?: unknown[];
   };
 }

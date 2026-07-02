@@ -27,6 +27,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import type { GpuInfo } from "@/types/gpu";
+import type { HostData, RuntimeModel } from "@/types/dashboard";
 
 interface HostTabProps {
   hostName: string;
@@ -36,27 +37,18 @@ interface HostTabProps {
   isFetching: boolean;
   error?: string;
   timestamp?: string;
+  snapshotSource?: string;
+  stale?: boolean;
+  fetchedAt?: number;
+  lastSuccessAt?: number;
+  fetchDurationMs?: number;
+  cacheAgeSeconds?: number;
   energyRate: number;
   currencySymbol?: string;
   onRefresh: () => void;
-  ollama?: {
-    isAvailable: boolean;
-    models: any[];
-    performanceMetrics: any;
-    recentRequests: any[];
-  };
-  sglang?: {
-    isAvailable: boolean;
-    models: any[];
-    sglangUrl?: string;
-    serverInfo?: any;
-  };
-  vllm?: {
-    isAvailable: boolean;
-    models: any[];
-    vllmUrl?: string;
-    version?: string;
-  };
+  ollama?: HostData["ollama"];
+  sglang?: HostData["sglang"];
+  vllm?: HostData["vllm"];
 }
 
 function formatBytes(bytes: number): string {
@@ -67,6 +59,23 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 }
 
+function formatEpochTime(epochSeconds?: number): string | undefined {
+  if (!epochSeconds) return undefined;
+  return new Date(epochSeconds * 1000).toLocaleTimeString();
+}
+
+function snapshotLabel(source?: string, stale?: boolean): string {
+  if (stale) return "Stale";
+  if (source === "cache") return "Cached";
+  if (source === "live") return "Live";
+  if (source === "stale-cache") return "Stale";
+  return "Snapshot";
+}
+
+function modelLabel(model: RuntimeModel): string {
+  return model.name || model.id || "Unknown model";
+}
+
 export function HostTab({
   hostName,
   hostUrl,
@@ -75,6 +84,12 @@ export function HostTab({
   isFetching,
   error,
   timestamp,
+  snapshotSource,
+  stale,
+  fetchedAt,
+  lastSuccessAt,
+  fetchDurationMs,
+  cacheAgeSeconds,
   energyRate,
   currencySymbol = "$",
   onRefresh,
@@ -99,6 +114,13 @@ export function HostTab({
   const memUsed = gpus.reduce((s, g) => s + g.memory.used, 0);
   const memTotal = gpus.reduce((s, g) => s + g.memory.total, 0);
   const memPct = memTotal > 0 ? Math.round((memUsed / memTotal) * 100) : 0;
+  const snapshotTime = formatEpochTime(fetchedAt);
+  const lastSuccessTime = formatEpochTime(lastSuccessAt);
+  const snapshotClassName = stale || snapshotSource === "stale-cache"
+    ? "text-[10px] h-5 gap-1 bg-amber-500/10 text-amber-500 border-amber-500/30"
+    : snapshotSource === "cache"
+      ? "text-[10px] h-5 gap-1 bg-blue-500/10 text-blue-500 border-blue-500/30"
+      : "text-[10px] h-5 gap-1 bg-emerald-500/10 text-emerald-500 border-emerald-500/30";
 
   return (
     <div className="space-y-5">
@@ -140,8 +162,22 @@ export function HostTab({
                   vLLM · {vllm.models.length} models
                 </Badge>
               )}
+              {snapshotSource && (
+                <Badge variant="outline" className={snapshotClassName}>
+                  <Timer className="h-3 w-3" />
+                  {snapshotLabel(snapshotSource, stale)}
+                  {typeof fetchDurationMs === "number" && ` · ${fetchDurationMs}ms`}
+                </Badge>
+              )}
             </h2>
-            <p className="text-xs text-muted-foreground">{hostUrl}</p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <span>{hostUrl}</span>
+              {snapshotTime && <span>Snapshot {snapshotTime}</span>}
+              {lastSuccessTime && <span>Last OK {lastSuccessTime}</span>}
+              {typeof cacheAgeSeconds === "number" && snapshotSource === "cache" && (
+                <span>Cache age {cacheAgeSeconds.toFixed(1)}s</span>
+              )}
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -373,9 +409,9 @@ export function HostTab({
                   </Card>
                 ) : (
                   <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                    {ollama.models.map((model: any) => (
+                    {ollama.models.map((model) => (
                       <Card
-                        key={model.name}
+                        key={modelLabel(model)}
                         className="shadow-none border-border/50"
                       >
                         <CardContent className="p-4 flex items-center gap-3">
@@ -384,10 +420,10 @@ export function HostTab({
                           </div>
                           <div className="min-w-0">
                             <div className="text-sm font-medium truncate">
-                              {model.name}
+                              {modelLabel(model)}
                             </div>
                             <div className="text-xs text-muted-foreground">
-                              {formatBytes(model.size)}
+                              {formatBytes(model.size || 0)}
                             </div>
                           </div>
                         </CardContent>
@@ -427,9 +463,9 @@ export function HostTab({
                   </Card>
                 ) : (
                   <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                    {vllm.models.map((model: any) => (
+                    {vllm.models.map((model) => (
                       <Card
-                        key={model.id}
+                        key={modelLabel(model)}
                         className="shadow-none border-border/50"
                       >
                         <CardContent className="p-4 flex items-center gap-3">
@@ -438,7 +474,7 @@ export function HostTab({
                           </div>
                           <div className="min-w-0">
                             <div className="text-sm font-medium truncate">
-                              {model.id}
+                              {modelLabel(model)}
                             </div>
                             <div className="text-xs text-muted-foreground">
                               vLLM{vllm.version ? ` v${vllm.version}` : ""}
@@ -466,9 +502,9 @@ export function HostTab({
                   </Card>
                 ) : (
                   <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                    {sglang.models.map((model: any) => (
+                    {sglang.models.map((model) => (
                       <Card
-                        key={model.id}
+                        key={modelLabel(model)}
                         className="shadow-none border-border/50"
                       >
                         <CardContent className="p-4 flex items-center gap-3">
@@ -477,7 +513,7 @@ export function HostTab({
                           </div>
                           <div className="min-w-0">
                             <div className="text-sm font-medium truncate">
-                              {model.id}
+                              {modelLabel(model)}
                             </div>
                             <div className="text-xs text-muted-foreground">
                               {model.owned_by || "sglang"}
