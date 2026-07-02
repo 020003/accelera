@@ -21,6 +21,10 @@ interface RuntimeProbeStatus {
   version?: string;
 }
 
+interface FleetSnapshotResponse {
+  hosts?: HostData[];
+}
+
 export function useFleetHosts({ demo, refreshInterval }: UseFleetHostsOptions) {
   const [hosts, setHosts] = useState<Host[]>([]);
   const [hostsLoaded, setHostsLoaded] = useState(false);
@@ -302,6 +306,36 @@ export function useFleetHosts({ demo, refreshInterval }: UseFleetHostsOptions) {
     }
   };
 
+  const fetchFleetSnapshot = async (): Promise<HostData[] | null> => {
+    try {
+      const response = await fetch("/api/fleet/snapshot", { credentials: "include" });
+      if (!response.ok) return null;
+      const data = await response.json() as FleetSnapshotResponse;
+      return Array.isArray(data.hosts) ? data.hosts : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const applyHostSnapshots = (snapshots: HostData[]) => {
+    setHostsData(snapshots);
+    setHosts((prev) => {
+      const liveByUrl = new Map<string, boolean>(
+        snapshots.map((host) => [host.url, host.isConnected])
+      );
+      let mutated = false;
+      const next = prev.map((host) => {
+        const live = liveByUrl.get(host.url) ?? false;
+        if (host.isConnected !== live) {
+          mutated = true;
+          return { ...host, isConnected: live };
+        }
+        return host;
+      });
+      return mutated ? next : prev;
+    });
+  };
+
   const fetchInProgress = useRef(false);
 
   const fetchAllHostsData = async () => {
@@ -318,6 +352,11 @@ export function useFleetHosts({ demo, refreshInterval }: UseFleetHostsOptions) {
           timestamp: demoParsed?.timestamp,
           error: demoError ? "Demo mode error" : undefined,
         }]);
+        return;
+      }
+      const snapshot = await fetchFleetSnapshot();
+      if (snapshot) {
+        applyHostSnapshots(snapshot);
         return;
       }
       if (hosts.length === 0) {
