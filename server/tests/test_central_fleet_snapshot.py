@@ -100,6 +100,12 @@ class CentralFleetSnapshotTests(unittest.TestCase):
             self.assertEqual(result["timestamp"], "2026-07-02T00:00:00Z")
             self.assertTrue(result["vllm"]["isAvailable"])
             self.assertEqual(result["vllm"]["models"], [{"id": "model-a"}])
+            self.assertEqual(result["snapshotSource"], "live")
+            self.assertFalse(result["stale"])
+            self.assertEqual(result["cacheAgeSeconds"], 0.0)
+            self.assertIn("fetchedAt", result)
+            self.assertIn("lastSuccessAt", result)
+            self.assertIn("fetchDurationMs", result)
 
     def test_fetch_host_snapshot_handles_exporter_failure(self):
         with tempfile.TemporaryDirectory() as data_dir:
@@ -110,13 +116,64 @@ class CentralFleetSnapshotTests(unittest.TestCase):
             with patch.object(fleet.requests, "get", lambda *args, **kwargs: _Response(500, {})):
                 result = fleet._fetch_host_snapshot({"url": "http://gpu:5000/nvidia-smi.json", "name": "GPU Host"})
 
-            self.assertEqual(result, {
-                "url": "http://gpu:5000/nvidia-smi.json",
-                "name": "GPU Host",
-                "isConnected": False,
-                "gpus": [],
-                "error": "fetch_failed",
-            })
+            self.assertEqual(result["url"], "http://gpu:5000/nvidia-smi.json")
+            self.assertEqual(result["name"], "GPU Host")
+            self.assertFalse(result["isConnected"])
+            self.assertEqual(result["gpus"], [])
+            self.assertEqual(result["error"], "fetch_failed")
+            self.assertEqual(result["snapshotSource"], "live")
+            self.assertFalse(result["stale"])
+            self.assertEqual(result["cacheAgeSeconds"], 0.0)
+            self.assertIn("fetchedAt", result)
+            self.assertIn("fetchDurationMs", result)
+
+    def test_fetch_host_snapshot_uses_fresh_cache(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            storage = _load_storage(data_dir)
+            storage.init_db()
+            fleet = _load_fleet(storage)
+            calls = {"get": 0}
+
+            def fake_get(url, **kwargs):
+                calls["get"] += 1
+                return _Response(200, {"timestamp": "ts", "gpus": [{"minor_number": 0}]})
+
+            def fake_post(url, json, **kwargs):
+                return _Response(200, {"isAvailable": False})
+
+            with patch.object(fleet.requests, "get", fake_get), patch.object(fleet.requests, "post", fake_post):
+                first = fleet._fetch_host_snapshot({"url": "http://gpu:5000/nvidia-smi.json", "name": "GPU Host"})
+                second = fleet._fetch_host_snapshot({"url": "http://gpu:5000/nvidia-smi.json", "name": "Renamed"})
+
+            self.assertEqual(calls["get"], 1)
+            self.assertEqual(first["snapshotSource"], "live")
+            self.assertEqual(second["snapshotSource"], "cache")
+            self.assertEqual(second["name"], "Renamed")
+            self.assertTrue(second["isConnected"])
+            self.assertFalse(second["stale"])
+
+    def test_fetch_host_snapshot_returns_stale_cache_after_failure(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            storage = _load_storage(data_dir)
+            storage.init_db()
+            fleet = _load_fleet(storage)
+
+            def fake_post(url, json, **kwargs):
+                return _Response(200, {"isAvailable": False})
+
+            with patch.object(fleet.requests, "get", lambda *args, **kwargs: _Response(200, {"timestamp": "ts", "gpus": [{"minor_number": 0}]})), patch.object(fleet.requests, "post", fake_post):
+                first = fleet._fetch_host_snapshot({"url": "http://gpu:5000/nvidia-smi.json", "name": "GPU Host"})
+
+            fleet._host_cache["http://gpu:5000/nvidia-smi.json"]["fetchedAt"] = first["fetchedAt"] - fleet.CACHE_TTL_SECONDS - 1
+            with patch.object(fleet.requests, "get", lambda *args, **kwargs: _Response(500, {})):
+                second = fleet._fetch_host_snapshot({"url": "http://gpu:5000/nvidia-smi.json", "name": "GPU Host"})
+
+            self.assertFalse(second["isConnected"])
+            self.assertEqual(second["snapshotSource"], "stale-cache")
+            self.assertTrue(second["stale"])
+            self.assertEqual(second["error"], "fetch_failed")
+            self.assertEqual(second["gpus"], [{"minor_number": 0}])
+            self.assertIn("lastSuccessAt", second)
 
 
 if __name__ == "__main__":
