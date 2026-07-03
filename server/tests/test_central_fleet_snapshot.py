@@ -175,6 +175,39 @@ class CentralFleetSnapshotTests(unittest.TestCase):
             self.assertEqual(second["gpus"], [{"minor_number": 0}])
             self.assertIn("lastSuccessAt", second)
 
+    def test_expired_gpu_snapshot_reuses_runtime_cache(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            storage = _load_storage(data_dir)
+            storage.init_db()
+            fleet = _load_fleet(storage)
+            calls = {"get": 0, "post": 0}
+
+            def fake_get(url, **kwargs):
+                calls["get"] += 1
+                return _Response(200, {
+                    "timestamp": f"ts-{calls['get']}",
+                    "gpus": [{"minor_number": 0, "utilization": calls["get"]}],
+                })
+
+            def fake_post(url, json, **kwargs):
+                calls["post"] += 1
+                if url.endswith("/api/vllm/discover"):
+                    return _Response(200, {"isAvailable": True, "models": [{"id": "model-a"}]})
+                return _Response(200, {"isAvailable": False})
+
+            host = {"url": "http://gpu:5000/nvidia-smi.json", "name": "GPU Host"}
+            with patch.object(fleet.requests, "get", fake_get), patch.object(fleet.requests, "post", fake_post):
+                first = fleet._fetch_host_snapshot(host)
+                fleet._host_cache[host["url"]]["fetchedAt"] = first["fetchedAt"] - fleet.CACHE_TTL_SECONDS - 1
+                second = fleet._fetch_host_snapshot(host)
+
+            self.assertEqual(calls["get"], 2)
+            self.assertEqual(calls["post"], 3)
+            self.assertEqual(first["gpus"], [{"minor_number": 0, "utilization": 1}])
+            self.assertEqual(second["gpus"], [{"minor_number": 0, "utilization": 2}])
+            self.assertEqual(second["snapshotSource"], "live")
+            self.assertEqual(second["vllm"]["models"], [{"id": "model-a"}])
+
 
 if __name__ == "__main__":
     unittest.main()

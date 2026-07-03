@@ -21,10 +21,12 @@ fleet_bp = Blueprint("fleet", __name__)
 
 HTTP_TIMEOUT = 5.0
 FAN_OUT_WORKERS = 8
-CACHE_TTL_SECONDS = float(os.environ.get("FLEET_SNAPSHOT_CACHE_TTL_SECONDS", "2"))
+CACHE_TTL_SECONDS = float(os.environ.get("FLEET_SNAPSHOT_CACHE_TTL_SECONDS", "0.5"))
+RUNTIME_CACHE_TTL_SECONDS = float(os.environ.get("FLEET_RUNTIME_CACHE_TTL_SECONDS", "300"))
 
 _cache_lock = threading.Lock()
 _host_cache: dict[str, dict] = {}
+_runtime_cache: dict[str, dict] = {}
 
 
 def _base_url(host_url: str) -> str:
@@ -64,7 +66,7 @@ def _safe_post_json(url: str, payload: dict) -> dict | None:
         return None
 
 
-def _runtime_snapshot(base_url: str) -> dict:
+def _runtime_snapshot_uncached(base_url: str) -> dict:
     result = {}
     payload = {"hostUrl": base_url}
     ollama = _safe_post_json(f"{base_url}/api/ollama/discover", payload)
@@ -102,6 +104,18 @@ def _runtime_snapshot(base_url: str) -> dict:
             "instances": vllm.get("instances") or [],
         }
     return result
+
+
+def _runtime_snapshot(base_url: str) -> dict:
+    now = time.time()
+    with _cache_lock:
+        cached = _runtime_cache.get(base_url)
+        if cached and now - cached["fetchedAt"] <= RUNTIME_CACHE_TTL_SECONDS:
+            return copy.deepcopy(cached["snapshot"])
+    snapshot = _runtime_snapshot_uncached(base_url)
+    with _cache_lock:
+        _runtime_cache[base_url] = {"fetchedAt": now, "snapshot": copy.deepcopy(snapshot)}
+    return snapshot
 
 
 def _decorate_snapshot(snapshot: dict, now: float, source: str, stale: bool = False) -> dict:
@@ -202,6 +216,7 @@ def fleet_snapshot():
             "fetchedAt": fetched_at,
             "fetchDurationMs": 0,
             "cacheTtlSeconds": CACHE_TTL_SECONDS,
+            "runtimeCacheTtlSeconds": RUNTIME_CACHE_TTL_SECONDS,
             "hosts": [],
         })
     with concurrent.futures.ThreadPoolExecutor(max_workers=FAN_OUT_WORKERS) as executor:
@@ -210,5 +225,6 @@ def fleet_snapshot():
         "fetchedAt": fetched_at,
         "fetchDurationMs": int((time.perf_counter() - started_at) * 1000),
         "cacheTtlSeconds": CACHE_TTL_SECONDS,
+        "runtimeCacheTtlSeconds": RUNTIME_CACHE_TTL_SECONDS,
         "hosts": snapshots,
     })
