@@ -280,9 +280,9 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang, vllm }: BenchmarkRunn
   const [latestResult, setLatestResult] = useState<BenchmarkResult | null>(cached?.latestResult ?? null);
   const [showHistory, setShowHistory] = useState(cached?.showHistory ?? false);
   const [loadingHistory, setLoadingHistory] = useState(false);
-  const [loadRequests, setLoadRequests] = useState(8);
-  const [loadConcurrency, setLoadConcurrency] = useState(4);
-  const [loadMaxTokens, setLoadMaxTokens] = useState(128);
+  const [loadRequests, setLoadRequests] = useState(64);
+  const [loadConcurrency, setLoadConcurrency] = useState(16);
+  const [loadMaxTokens, setLoadMaxTokens] = useState(256);
   const [loadPromptText, setLoadPromptText] = useState(DEFAULT_MIXED_PROMPT_TEXT);
   const [loadRunning, setLoadRunning] = useState(false);
   const [loadCompleted, setLoadCompleted] = useState(0);
@@ -440,9 +440,9 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang, vllm }: BenchmarkRunn
     setLoadError(null);
     const base = getBaseUrl();
     const modelName = selectedModel.replace(/^(ollama|sglang|vllm):/, "");
-    const requestCount = clampNumber(loadRequests, 1, 50);
-    const concurrency = clampNumber(loadConcurrency, 1, 10);
-    const maxTokens = clampNumber(loadMaxTokens, 16, 1024);
+    const requestCount = clampNumber(loadRequests, 4, 500);
+    const concurrency = clampNumber(loadConcurrency, 1, 64);
+    const maxTokens = clampNumber(loadMaxTokens, 16, 512);
     const startedAt = performance.now();
     try {
       const prompts = parseMixedPrompts(loadPromptText);
@@ -691,10 +691,10 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang, vllm }: BenchmarkRunn
               <label className="text-xs text-muted-foreground font-medium">Requests</label>
               <Input
                 type="number"
-                min={1}
-                max={50}
+                min={4}
+                max={500}
                 value={loadRequests}
-                onChange={(event) => setLoadRequests(clampNumber(Number(event.target.value), 1, 50))}
+                onChange={(event) => setLoadRequests(clampNumber(Number(event.target.value), 4, 500))}
                 className="h-9 text-xs font-mono"
               />
             </div>
@@ -703,9 +703,9 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang, vllm }: BenchmarkRunn
               <Input
                 type="number"
                 min={1}
-                max={10}
+                max={64}
                 value={loadConcurrency}
-                onChange={(event) => setLoadConcurrency(clampNumber(Number(event.target.value), 1, 10))}
+                onChange={(event) => setLoadConcurrency(clampNumber(Number(event.target.value), 1, 64))}
                 className="h-9 text-xs font-mono"
               />
             </div>
@@ -714,9 +714,9 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang, vllm }: BenchmarkRunn
               <Input
                 type="number"
                 min={16}
-                max={1024}
+                max={512}
                 value={loadMaxTokens}
-                onChange={(event) => setLoadMaxTokens(clampNumber(Number(event.target.value), 16, 1024))}
+                onChange={(event) => setLoadMaxTokens(clampNumber(Number(event.target.value), 16, 512))}
                 className="h-9 text-xs font-mono"
               />
             </div>
@@ -743,7 +743,7 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang, vllm }: BenchmarkRunn
               disabled={loadRunning}
             />
             <p className="text-[11px] text-muted-foreground">
-              One JSON object per line with `name`, `prompt`, `weight`, and `max_tokens`. Safe bounds: 1-50 requests, 1-10 concurrency, 16-1024 tokens.
+              One JSON object per line with `name`, `prompt`, `weight`, and `max_tokens`. Defaults model a small real traffic burst: 64 requests, 16-way concurrency, 256 output tokens. Bounds: 4-500 requests, 1-64 concurrency, 16-512 tokens.
             </p>
           </div>
 
