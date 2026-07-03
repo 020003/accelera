@@ -143,24 +143,54 @@ def _benchmark_ollama(ollama_url: str, model: str, prompt: str, max_tokens: int)
         }
 
 
+def _extract_openai_response_text(data: dict) -> str:
+    choices = data.get("choices", [])
+    if not choices:
+        return ""
+    choice = choices[0]
+    if "text" in choice:
+        return choice.get("text") or ""
+    message = choice.get("message") or {}
+    return message.get("content") or ""
+
+
+def _openai_compat_payload(model: str, prompt: str, max_tokens: int, chat: bool) -> dict:
+    if chat:
+        return {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+    return {
+        "model": model,
+        "prompt": prompt,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+
+
 def _benchmark_openai_compat(base_url: str, model: str, prompt: str, max_tokens: int, runtime: str) -> dict:
-    """Run a single benchmark against an OpenAI-compatible /v1/completions endpoint.
+    """Run a single benchmark against OpenAI-compatible completion endpoints.
 
     Works for both SGLang and vLLM.
     """
     t0 = time.perf_counter()
 
     try:
+        endpoint = "completions"
         resp = http_requests.post(
             f"{base_url}/v1/completions",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "max_tokens": max_tokens,
-                "stream": False,
-            },
+            json=_openai_compat_payload(model, prompt, max_tokens, chat=False),
             timeout=120,
         )
+        if resp.status_code == 404:
+            endpoint = "chat/completions"
+            resp = http_requests.post(
+                f"{base_url}/v1/chat/completions",
+                json=_openai_compat_payload(model, prompt, max_tokens, chat=True),
+                timeout=120,
+            )
         resp.raise_for_status()
         data = resp.json()
 
@@ -169,11 +199,7 @@ def _benchmark_openai_compat(base_url: str, model: str, prompt: str, max_tokens:
         gen_tokens = usage.get("completion_tokens", 0)
         prompt_tokens = usage.get("prompt_tokens", 0)
         tps = gen_tokens / (total_ms / 1000) if total_ms > 0 and gen_tokens > 0 else 0
-
-        response_text = ""
-        choices = data.get("choices", [])
-        if choices:
-            response_text = choices[0].get("text", "")
+        response_text = _extract_openai_response_text(data)
 
         return {
             "model": model,
@@ -185,7 +211,7 @@ def _benchmark_openai_compat(base_url: str, model: str, prompt: str, max_tokens:
             "time_to_first_token_ms": None,
             "total_duration_ms": round(total_ms, 1),
             "status": "completed",
-            "metadata": {"max_tokens": max_tokens, "response_preview": response_text[:300]},
+            "metadata": {"max_tokens": max_tokens, "response_preview": response_text[:300], "endpoint": endpoint},
         }
 
     except Exception as exc:

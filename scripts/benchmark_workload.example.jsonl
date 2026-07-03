@@ -1,0 +1,6 @@
+{"name":"short_chat","weight":30,"max_tokens":64,"prompt":"In two sentences, explain why GPU memory bandwidth matters for LLM inference."}
+{"name":"technical_explain","weight":20,"max_tokens":128,"prompt":"Explain tensor parallelism to an ML engineer who understands CUDA but is new to distributed inference."}
+{"name":"summarize","weight":15,"max_tokens":96,"prompt":"Summarize this incident update for an executive audience: GPU utilization dropped after a polling refactor, runtime probes were coupled to telemetry refresh, and cache TTLs were split to restore freshness."}
+{"name":"code_help","weight":15,"max_tokens":160,"prompt":"Write a Python function that computes p50, p95, and p99 latency from a list of millisecond measurements."}
+{"name":"json_extraction","weight":10,"max_tokens":96,"prompt":"Return JSON with keys risk, root_cause, next_action for this issue: benchmark requests time out under mixed concurrent load."}
+{"name":"long_reasoning","weight":10,"max_tokens":256,"prompt":"Compare throughput, latency, and fairness tradeoffs when serving a mix of short chat prompts and long code-generation prompts on the same LLM server."}

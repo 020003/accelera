@@ -201,6 +201,21 @@ pip install -r requirements.txt
 python app.py
 ```
 
+### Benchmark mixed-load testing
+
+Use the local benchmark load tester to send concurrent, weighted, mixed-prompt traffic to a GPU exporter:
+
+```bash
+python3 scripts/benchmark_load.py \
+  --target http://10.0.0.14:5000 \
+  --runtime vllm \
+  --model qwen3.6-35b-a3b-mtp \
+  --requests 12 \
+  --concurrency 3
+```
+
+Use `scripts/benchmark_workload.example.jsonl` as a starting point for real user mixes. Each JSONL row can set `name`, `prompt`, `weight`, `max_tokens`, and optional per-row `runtime`/`model` overrides.
+
 ---
 
 ## Configuration
