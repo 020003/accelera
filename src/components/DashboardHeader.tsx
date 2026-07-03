@@ -1,6 +1,18 @@
 import { Button } from "@/components/ui/button";
-import { Sun, Moon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Sun, Moon, Timer, AlertTriangle } from "lucide-react";
 import type { HostData } from "@/types/dashboard";
+
+interface FleetFreshnessSummary {
+  totalHosts: number;
+  onlineHosts: number;
+  offlineHosts: number;
+  liveHosts: number;
+  cachedHosts: number;
+  staleHosts: number;
+  oldestCacheAgeSeconds: number;
+  oldestSampleAgeSeconds: number;
+}
 
 interface DashboardHeaderProps {
   theme: string;
@@ -11,6 +23,10 @@ interface DashboardHeaderProps {
   totalAiModels: number;
   hostsWithOllama: number;
   hostsWithSglang: number;
+  performanceMode: string;
+  refreshInterval: number;
+  fleetFetchDurationMs?: number;
+  fleetFreshness?: FleetFreshnessSummary;
 }
 
 export function DashboardHeader({
@@ -22,7 +38,14 @@ export function DashboardHeader({
   totalAiModels,
   hostsWithOllama,
   hostsWithSglang,
+  performanceMode,
+  refreshInterval,
+  fleetFetchDurationMs,
+  fleetFreshness,
 }: DashboardHeaderProps) {
+  const staleHosts = fleetFreshness?.staleHosts || 0;
+  const cachedHosts = fleetFreshness?.cachedHosts || 0;
+
   return (
     <header className="navbar">
       <div className="container mx-auto px-4 py-4">
@@ -42,17 +65,32 @@ export function DashboardHeader({
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4">
-            <div className="hidden lg:flex items-center gap-4 text-sm text-muted-foreground">
+            <div className="hidden xl:flex items-center gap-3 text-sm text-muted-foreground">
               <span><span className="font-medium">Hosts:</span> {connectedHosts.length}/{hostsData.length}</span>
               <span><span className="font-medium">GPUs:</span> {totalGpus}</span>
               {totalAiModels > 0 && (
                 <span><span className="font-medium">AI Models:</span> {totalAiModels}</span>
               )}
+              <Badge variant="outline" className="gap-1 text-[11px] capitalize">
+                <Timer className="h-3 w-3" />
+                {performanceMode.replace("-", " ")} · {refreshInterval > 0 ? `${refreshInterval / 1000}s` : "manual"}
+              </Badge>
+              {typeof fleetFetchDurationMs === "number" && (
+                <Badge variant="secondary" className="text-[11px]">
+                  Snapshot {fleetFetchDurationMs}ms
+                </Badge>
+              )}
+              {(staleHosts > 0 || cachedHosts > 0) && (
+                <Badge variant="outline" className="gap-1 text-[11px] text-amber-500 border-amber-500/30 bg-amber-500/10">
+                  <AlertTriangle className="h-3 w-3" />
+                  {staleHosts} stale · {cachedHosts} cached
+                </Badge>
+              )}
             </div>
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8"
+              className="h-8 w-8 cursor-pointer"
               onClick={toggleTheme}
               title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
             >

@@ -3,12 +3,14 @@
 No external dependencies — uses an in-memory token-bucket per IP.
 """
 
+import hmac
 import logging
 import time
 import threading
 from collections import defaultdict
 
 from flask import Flask, jsonify, request
+from config import cfg
 
 log = logging.getLogger(__name__)
 
@@ -49,8 +51,26 @@ def _rate_limited(ip: str, rate: int = _DEFAULT_RATE, window: int = _DEFAULT_WIN
         return bucket[0] > rate
 
 
+def _authorized_exporter_request() -> bool:
+    expected = cfg("EXPORTER_AUTH_TOKEN")
+    if not expected:
+        return True
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        return False
+    supplied = header.removeprefix("Bearer ").strip()
+    return hmac.compare_digest(supplied, expected)
+
+
 def register_middleware(app: Flask):
     """Attach rate limiter and global error handlers to *app*."""
+
+    @app.before_request
+    def _check_exporter_auth():
+        if request.path in ("/health", "/api/health"):
+            return None
+        if not _authorized_exporter_request():
+            return jsonify({"error": "Exporter authentication required", "status": 401}), 401
 
     # ── Rate limiting ──────────────────────────────────────────────
     @app.before_request

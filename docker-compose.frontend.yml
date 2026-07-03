@@ -10,6 +10,7 @@ services:
     environment:
       - BACKEND_URL=backend:5001
       - ALLOWED_PROXY_RANGE=${ALLOWED_PROXY_RANGE:-NOOP_BLOCK_ALL_PRIVATE}
+      - EXPORTER_AUTH_TOKEN=${EXPORTER_AUTH_TOKEN:-}
     depends_on:
       backend:
         condition: service_healthy
@@ -29,6 +30,7 @@ services:
       - SECRET_KEY=${SECRET_KEY:-}
       - SESSION_LIFETIME_HOURS=${SESSION_LIFETIME_HOURS:-24}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - EXPORTER_AUTH_TOKEN=${EXPORTER_AUTH_TOKEN:-}
     volumes:
       - central-data:/app/data
     healthcheck:

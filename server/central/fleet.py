@@ -23,14 +23,25 @@ HTTP_TIMEOUT = 5.0
 FAN_OUT_WORKERS = 8
 CACHE_TTL_SECONDS = float(os.environ.get("FLEET_SNAPSHOT_CACHE_TTL_SECONDS", "0.5"))
 RUNTIME_CACHE_TTL_SECONDS = float(os.environ.get("FLEET_RUNTIME_CACHE_TTL_SECONDS", "300"))
+EXPORTER_AUTH_TOKEN = os.environ.get("EXPORTER_AUTH_TOKEN", "")
+STALE_ALERT_SECONDS = float(os.environ.get("FLEET_STALE_ALERT_SECONDS", "15"))
+OFFLINE_ALERT_SECONDS = float(os.environ.get("FLEET_OFFLINE_ALERT_SECONDS", "30"))
 
 _cache_lock = threading.Lock()
 _host_cache: dict[str, dict] = {}
 _runtime_cache: dict[str, dict] = {}
+_host_status: dict[str, dict] = {}
 
 
 def _base_url(host_url: str) -> str:
     return host_url.rstrip("/").removesuffix("/nvidia-smi.json")
+
+
+def _request_headers() -> dict:
+    headers = {"User-Agent": "accelera-central/1.0"}
+    if EXPORTER_AUTH_TOKEN:
+        headers["Authorization"] = f"Bearer {EXPORTER_AUTH_TOKEN}"
+    return headers
 
 
 def _safe_get_json(url: str) -> dict | None:
@@ -38,7 +49,7 @@ def _safe_get_json(url: str) -> dict | None:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
             return None
-        response = requests.get(url, timeout=HTTP_TIMEOUT, headers={"User-Agent": "accelera-central/1.0"})
+        response = requests.get(url, timeout=HTTP_TIMEOUT, headers=_request_headers())
         if response.status_code != 200:
             return None
         return response.json()
@@ -56,7 +67,7 @@ def _safe_post_json(url: str, payload: dict) -> dict | None:
             url,
             json=payload,
             timeout=HTTP_TIMEOUT,
-            headers={"User-Agent": "accelera-central/1.0"},
+            headers=_request_headers(),
         )
         if response.status_code != 200:
             return None
@@ -118,6 +129,23 @@ def _runtime_snapshot(base_url: str) -> dict:
     return snapshot
 
 
+def _runtime_snapshot_with_metadata(host: dict) -> dict:
+    now = time.time()
+    base_url = _base_url(host["url"])
+    snapshot = _runtime_snapshot(base_url)
+    with _cache_lock:
+        cached = _runtime_cache.get(base_url, {})
+        fetched_at = cached.get("fetchedAt", now)
+    result = {
+        "url": host["url"],
+        "name": host["name"],
+        "fetchedAt": fetched_at,
+        "cacheAgeSeconds": round(max(0.0, now - fetched_at), 3),
+    }
+    result.update(snapshot)
+    return result
+
+
 def _decorate_snapshot(snapshot: dict, now: float, source: str, stale: bool = False) -> dict:
     result = copy.deepcopy(snapshot)
     result["snapshotSource"] = source
@@ -136,6 +164,23 @@ def _cached_snapshot(url: str, now: float) -> dict | None:
         return _decorate_snapshot(cached["snapshot"], now, "cache")
 
 
+def _remember_host_status(snapshot: dict) -> None:
+    with _cache_lock:
+        _host_status[snapshot["url"]] = {
+            "url": snapshot["url"],
+            "name": snapshot.get("name"),
+            "isConnected": snapshot.get("isConnected", False),
+            "snapshotSource": snapshot.get("snapshotSource"),
+            "stale": snapshot.get("stale", False),
+            "error": snapshot.get("error"),
+            "fetchedAt": snapshot.get("fetchedAt"),
+            "lastSuccessAt": snapshot.get("lastSuccessAt"),
+            "fetchDurationMs": snapshot.get("fetchDurationMs"),
+            "cacheAgeSeconds": snapshot.get("cacheAgeSeconds", 0.0),
+            "gpuCount": len(snapshot.get("gpus") or []),
+        }
+
+
 def _stale_snapshot(url: str, host_name: str, now: float, error: str, fetch_duration_ms: int) -> dict | None:
     with _cache_lock:
         cached = _host_cache.get(url)
@@ -146,12 +191,14 @@ def _stale_snapshot(url: str, host_name: str, now: float, error: str, fetch_dura
     snapshot["isConnected"] = False
     snapshot["error"] = error
     snapshot["fetchDurationMs"] = fetch_duration_ms
+    _remember_host_status(snapshot)
     return snapshot
 
 
 def _store_snapshot(url: str, snapshot: dict) -> None:
     with _cache_lock:
         _host_cache[url] = {"fetchedAt": snapshot["fetchedAt"], "snapshot": copy.deepcopy(snapshot)}
+    _remember_host_status(snapshot)
 
 
 def _fetch_host_snapshot_uncached(host: dict) -> dict:
@@ -165,7 +212,7 @@ def _fetch_host_snapshot_uncached(host: dict) -> dict:
         stale = _stale_snapshot(url, host["name"], fetched_at, "fetch_failed", fetch_duration_ms)
         if stale:
             return stale
-        return {
+        snapshot = {
             "url": url,
             "name": host["name"],
             "isConnected": False,
@@ -177,6 +224,8 @@ def _fetch_host_snapshot_uncached(host: dict) -> dict:
             "stale": False,
             "cacheAgeSeconds": 0.0,
         }
+        _remember_host_status(snapshot)
+        return snapshot
     snapshot = {
         "url": url,
         "name": host["name"],
@@ -201,8 +250,85 @@ def _fetch_host_snapshot(host: dict) -> dict:
     cached = _cached_snapshot(host["url"], now)
     if cached:
         cached["name"] = host["name"]
+        _remember_host_status(cached)
         return cached
     return _fetch_host_snapshot_uncached(host)
+
+
+def _freshness_summary(snapshots: list[dict], now: float) -> dict:
+    cache_ages = [float(host.get("cacheAgeSeconds", 0.0)) for host in snapshots]
+    sample_ages = [max(0.0, now - host.get("fetchedAt", now)) for host in snapshots if host.get("fetchedAt")]
+    return {
+        "totalHosts": len(snapshots),
+        "onlineHosts": sum(1 for host in snapshots if host.get("isConnected")),
+        "offlineHosts": sum(1 for host in snapshots if not host.get("isConnected")),
+        "liveHosts": sum(1 for host in snapshots if host.get("snapshotSource") == "live" and not host.get("stale")),
+        "cachedHosts": sum(1 for host in snapshots if host.get("snapshotSource") == "cache"),
+        "staleHosts": sum(1 for host in snapshots if host.get("stale")),
+        "oldestCacheAgeSeconds": round(max(cache_ages), 3) if cache_ages else 0.0,
+        "oldestSampleAgeSeconds": round(max(sample_ages), 3) if sample_ages else 0.0,
+    }
+
+
+def _fleet_alerts(snapshots: list[dict], now: float) -> list[dict]:
+    alerts = []
+    for host in snapshots:
+        age = max(0.0, now - host.get("fetchedAt", now)) if host.get("fetchedAt") else 0.0
+        if not host.get("isConnected") and age >= OFFLINE_ALERT_SECONDS:
+            alerts.append({
+                "type": "offline",
+                "severity": "critical",
+                "host": host.get("name"),
+                "url": host.get("url"),
+                "ageSeconds": round(age, 3),
+            })
+        elif host.get("stale") or age >= STALE_ALERT_SECONDS:
+            alerts.append({
+                "type": "stale",
+                "severity": "warning",
+                "host": host.get("name"),
+                "url": host.get("url"),
+                "ageSeconds": round(age, 3),
+            })
+    return alerts
+
+
+def _diagnostics(now: float) -> dict:
+    hosts = storage.load_hosts()
+    with _cache_lock:
+        host_cache = copy.deepcopy(_host_cache)
+        runtime_cache = copy.deepcopy(_runtime_cache)
+        host_status = copy.deepcopy(_host_status)
+    host_rows = []
+    for host in hosts:
+        url = host["url"]
+        base_url = _base_url(url)
+        cached = host_cache.get(url)
+        runtime = runtime_cache.get(base_url)
+        status = host_status.get(url, {})
+        host_rows.append({
+            "url": url,
+            "name": host["name"],
+            "isConnected": status.get("isConnected", False),
+            "snapshotSource": status.get("snapshotSource"),
+            "stale": status.get("stale", False),
+            "error": status.get("error"),
+            "gpuCount": status.get("gpuCount", 0),
+            "fetchDurationMs": status.get("fetchDurationMs"),
+            "fetchedAt": status.get("fetchedAt"),
+            "lastSuccessAt": status.get("lastSuccessAt"),
+            "hostCacheAgeSeconds": round(max(0.0, now - cached["fetchedAt"]), 3) if cached else None,
+            "runtimeCacheAgeSeconds": round(max(0.0, now - runtime["fetchedAt"]), 3) if runtime else None,
+        })
+    return {
+        "generatedAt": now,
+        "cacheTtlSeconds": CACHE_TTL_SECONDS,
+        "runtimeCacheTtlSeconds": RUNTIME_CACHE_TTL_SECONDS,
+        "exporterAuthConfigured": bool(EXPORTER_AUTH_TOKEN),
+        "hostCacheSize": len(host_cache),
+        "runtimeCacheSize": len(runtime_cache),
+        "hosts": host_rows,
+    }
 
 
 @fleet_bp.route("/api/fleet/snapshot", methods=["GET"])
@@ -217,14 +343,41 @@ def fleet_snapshot():
             "fetchDurationMs": 0,
             "cacheTtlSeconds": CACHE_TTL_SECONDS,
             "runtimeCacheTtlSeconds": RUNTIME_CACHE_TTL_SECONDS,
+            "freshness": _freshness_summary([], fetched_at),
+            "alerts": [],
             "hosts": [],
         })
     with concurrent.futures.ThreadPoolExecutor(max_workers=FAN_OUT_WORKERS) as executor:
         snapshots = list(executor.map(_fetch_host_snapshot, hosts))
+    finished_at = time.time()
     return jsonify({
         "fetchedAt": fetched_at,
         "fetchDurationMs": int((time.perf_counter() - started_at) * 1000),
         "cacheTtlSeconds": CACHE_TTL_SECONDS,
         "runtimeCacheTtlSeconds": RUNTIME_CACHE_TTL_SECONDS,
+        "freshness": _freshness_summary(snapshots, finished_at),
+        "alerts": _fleet_alerts(snapshots, finished_at),
         "hosts": snapshots,
     })
+
+
+@fleet_bp.route("/api/fleet/runtime", methods=["GET"])
+@login_required
+def fleet_runtime():
+    started_at = time.perf_counter()
+    fetched_at = time.time()
+    hosts = storage.load_hosts()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=FAN_OUT_WORKERS) as executor:
+        runtime_hosts = list(executor.map(_runtime_snapshot_with_metadata, hosts))
+    return jsonify({
+        "fetchedAt": fetched_at,
+        "fetchDurationMs": int((time.perf_counter() - started_at) * 1000),
+        "runtimeCacheTtlSeconds": RUNTIME_CACHE_TTL_SECONDS,
+        "hosts": runtime_hosts,
+    })
+
+
+@fleet_bp.route("/api/fleet/snapshot/diagnostics", methods=["GET"])
+@login_required
+def fleet_snapshot_diagnostics():
+    return jsonify(_diagnostics(time.time()))

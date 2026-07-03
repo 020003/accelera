@@ -208,6 +208,112 @@ class CentralFleetSnapshotTests(unittest.TestCase):
             self.assertEqual(second["snapshotSource"], "live")
             self.assertEqual(second["vllm"]["models"], [{"id": "model-a"}])
 
+    def test_request_headers_include_exporter_token_when_configured(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            storage = _load_storage(data_dir)
+            storage.init_db()
+            fleet = _load_fleet(storage)
+
+            self.assertNotIn("Authorization", fleet._request_headers())
+            fleet.EXPORTER_AUTH_TOKEN = "secret-token"
+            self.assertEqual(fleet._request_headers()["Authorization"], "Bearer secret-token")
+
+    def test_fleet_snapshot_includes_freshness_summary(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            storage = _load_storage(data_dir)
+            storage.init_db()
+            storage.save_host("http://gpu-a:5000/nvidia-smi.json", "GPU A", "2026-07-03T00:00:00Z")
+            storage.save_host("http://gpu-b:5000/nvidia-smi.json", "GPU B", "2026-07-03T00:00:01Z")
+            fleet = _load_fleet(storage)
+
+            def fake_get(url, **kwargs):
+                if "gpu-a" in url:
+                    return _Response(200, {"timestamp": "ts-a", "gpus": [{"minor_number": 0}]})
+                return _Response(500, {})
+
+            with patch.object(fleet.requests, "get", fake_get), patch.object(fleet.requests, "post", lambda *args, **kwargs: _Response(200, {"isAvailable": False})):
+                result = fleet.fleet_snapshot()
+
+            self.assertEqual(result["freshness"]["totalHosts"], 2)
+            self.assertEqual(result["freshness"]["onlineHosts"], 1)
+            self.assertEqual(result["freshness"]["offlineHosts"], 1)
+            self.assertEqual(result["freshness"]["liveHosts"], 2)
+            self.assertEqual(result["freshness"]["cachedHosts"], 0)
+            self.assertEqual(result["freshness"]["staleHosts"], 0)
+            self.assertIn("oldestSampleAgeSeconds", result["freshness"])
+
+    def test_fleet_alerts_marks_stale_and_offline_hosts(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            storage = _load_storage(data_dir)
+            storage.init_db()
+            fleet = _load_fleet(storage)
+            now = 100.0
+            snapshots = [
+                {
+                    "url": "http://gpu-a:5000/nvidia-smi.json",
+                    "name": "GPU A",
+                    "isConnected": True,
+                    "stale": True,
+                    "fetchedAt": 99.0,
+                },
+                {
+                    "url": "http://gpu-b:5000/nvidia-smi.json",
+                    "name": "GPU B",
+                    "isConnected": False,
+                    "stale": False,
+                    "fetchedAt": 60.0,
+                },
+            ]
+
+            alerts = fleet._fleet_alerts(snapshots, now)
+
+            self.assertEqual(alerts[0]["type"], "stale")
+            self.assertEqual(alerts[0]["severity"], "warning")
+            self.assertEqual(alerts[1]["type"], "offline")
+            self.assertEqual(alerts[1]["severity"], "critical")
+
+    def test_fleet_runtime_returns_cached_runtime_metadata(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            storage = _load_storage(data_dir)
+            storage.init_db()
+            storage.save_host("http://gpu:5000/nvidia-smi.json", "GPU Host", "2026-07-03T00:00:00Z")
+            fleet = _load_fleet(storage)
+            calls = {"post": 0}
+
+            def fake_post(url, json, **kwargs):
+                calls["post"] += 1
+                if url.endswith("/api/vllm/discover"):
+                    return _Response(200, {"isAvailable": True, "models": [{"id": "model-a"}]})
+                return _Response(200, {"isAvailable": False})
+
+            with patch.object(fleet.requests, "post", fake_post):
+                first = fleet.fleet_runtime()
+                second = fleet.fleet_runtime()
+
+            self.assertEqual(calls["post"], 3)
+            self.assertEqual(first["hosts"][0]["vllm"]["models"], [{"id": "model-a"}])
+            self.assertEqual(second["hosts"][0]["vllm"]["models"], [{"id": "model-a"}])
+            self.assertIn("cacheAgeSeconds", second["hosts"][0])
+
+    def test_fleet_snapshot_diagnostics_reports_cache_state(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            storage = _load_storage(data_dir)
+            storage.init_db()
+            storage.save_host("http://gpu:5000/nvidia-smi.json", "GPU Host", "2026-07-03T00:00:00Z")
+            fleet = _load_fleet(storage)
+
+            with patch.object(fleet.requests, "get", lambda *args, **kwargs: _Response(200, {"timestamp": "ts", "gpus": [{"minor_number": 0}]})), patch.object(fleet.requests, "post", lambda *args, **kwargs: _Response(200, {"isAvailable": False})):
+                fleet._fetch_host_snapshot({"url": "http://gpu:5000/nvidia-smi.json", "name": "GPU Host"})
+                result = fleet.fleet_snapshot_diagnostics()
+
+            self.assertEqual(result["hostCacheSize"], 1)
+            self.assertEqual(result["runtimeCacheSize"], 1)
+            self.assertEqual(result["hosts"][0]["name"], "GPU Host")
+            self.assertTrue(result["hosts"][0]["isConnected"])
+            self.assertEqual(result["hosts"][0]["gpuCount"], 1)
+            self.assertIn("hostCacheAgeSeconds", result["hosts"][0])
+            self.assertIn("runtimeCacheAgeSeconds", result["hosts"][0])
+
 
 if __name__ == "__main__":
     unittest.main()

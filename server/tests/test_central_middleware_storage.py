@@ -13,6 +13,7 @@ def _load_storage(data_dir: str):
     sys.modules.pop("central_storage_under_test", None)
     config = types.ModuleType("config")
     config.DATA_DIR = data_dir
+    config.cfg = lambda key: ""
     sys.modules["config"] = config
     spec = importlib.util.spec_from_file_location("central_storage_under_test", CENTRAL / "storage.py")
     module = importlib.util.module_from_spec(spec)

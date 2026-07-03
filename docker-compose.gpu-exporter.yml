@@ -17,6 +17,7 @@ services:
       - PROMETHEUS_ENABLED=${PROMETHEUS_ENABLED:-true}
       - GPU_COLLECT_INTERVAL=${GPU_COLLECT_INTERVAL:-60}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - EXPORTER_AUTH_TOKEN=${EXPORTER_AUTH_TOKEN:-}
       # ── AI Runtime Integration ──
       # Use host.docker.internal to reach services on the Docker host.
       - OLLAMA_URL=http://host.docker.internal:11434

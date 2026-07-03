@@ -15,9 +15,15 @@ import { useAuth } from "@/hooks/useAuth";
 import { CURRENCIES } from "@/hooks/useCurrency";
 import type { Host, HostData } from "@/types/dashboard";
 
+type PerformanceMode = "realtime" | "balanced" | "low-load" | "manual";
+
 interface SettingsTabProps {
   refreshInterval: number;
   handleRefreshInterval: (value: string) => void;
+  performanceMode: PerformanceMode;
+  handlePerformanceMode: (mode: PerformanceMode) => void;
+  cacheTtlSeconds?: number;
+  runtimeCacheTtlSeconds?: number;
   energyRate: number;
   handleEnergyRate: (value: string) => void;
   demo: boolean;
@@ -33,6 +39,10 @@ interface SettingsTabProps {
 export function SettingsTab({
   refreshInterval,
   handleRefreshInterval,
+  performanceMode,
+  handlePerformanceMode,
+  cacheTtlSeconds,
+  runtimeCacheTtlSeconds,
   energyRate,
   handleEnergyRate,
   demo,
@@ -59,7 +69,24 @@ export function SettingsTab({
         </div>
         <Card>
           <CardContent className="pt-6">
-            <div className="grid gap-6 md:grid-cols-2">
+            <div className="grid gap-6 md:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label className="text-sm font-medium">Performance Mode</Label>
+                <Select value={performanceMode} onValueChange={(value) => handlePerformanceMode(value as PerformanceMode)}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="realtime">Realtime · 2s refresh</SelectItem>
+                    <SelectItem value="balanced">Balanced · 5s refresh</SelectItem>
+                    <SelectItem value="low-load">Low-load · 30s refresh</SelectItem>
+                    <SelectItem value="manual">Manual only</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Tunes dashboard freshness versus fleet polling load.
+                </p>
+              </div>
               <div className="space-y-1.5">
                 <Label className="text-sm font-medium">Auto-Refresh Interval</Label>
                 <Select value={refreshInterval.toString()} onValueChange={handleRefreshInterval}>
@@ -82,7 +109,16 @@ export function SettingsTab({
                     : `GPU metrics, power data, and AI runtime status update every ${refreshInterval / 1000}s.`}
                 </p>
               </div>
-              <div className="flex items-center justify-between rounded-lg border p-3">
+              <div className="space-y-1.5 rounded-lg border p-3">
+                <Label className="text-sm font-medium">Central Cache TTLs</Label>
+                <p className="text-xs text-muted-foreground">
+                  GPU telemetry cache: {typeof cacheTtlSeconds === "number" ? `${cacheTtlSeconds}s` : "unknown"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Runtime metadata cache: {typeof runtimeCacheTtlSeconds === "number" ? `${runtimeCacheTtlSeconds}s` : "unknown"}
+                </p>
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-3 md:col-span-3">
                 <div className="space-y-0.5">
                   <Label className="text-sm font-medium">Demo Mode</Label>
                   <p className="text-xs text-muted-foreground">

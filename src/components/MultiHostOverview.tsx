@@ -28,35 +28,27 @@ import {
   CheckCircle,
   AlertTriangle,
   Sparkles,
+  Clock,
 } from "lucide-react";
 import { useFleetTokenStats } from "@/hooks/useFleetTokenStats";
-import type { GpuInfo } from "@/types/gpu";
+import type { HostData } from "@/types/dashboard";
 
-interface HostData {
-  url: string;
-  name: string;
-  isConnected: boolean;
-  gpus: GpuInfo[];
-  timestamp?: string;
-  error?: string;
-  ollama?: {
-    isAvailable: boolean;
-    models: any[];
-    performanceMetrics: any;
-    recentRequests: any[];
-  };
-  sglang?: {
-    isAvailable: boolean;
-    models: any[];
-    sglangUrl?: string;
-    serverInfo?: any;
-  };
+interface FleetFreshnessSummary {
+  totalHosts: number;
+  onlineHosts: number;
+  offlineHosts: number;
+  liveHosts: number;
+  cachedHosts: number;
+  staleHosts: number;
+  oldestCacheAgeSeconds: number;
+  oldestSampleAgeSeconds: number;
 }
 
 interface MultiHostOverviewProps {
   hostsData: HostData[];
   energyRate: number;
   currencySymbol?: string;
+  fleetFreshness?: FleetFreshnessSummary;
 }
 
 function fmt(n: number): string {
@@ -80,7 +72,7 @@ const TIME_RANGES = [
   { label: "7d", hours: 168 },
 ] as const;
 
-export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$" }: MultiHostOverviewProps) {
+export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$", fleetFreshness }: MultiHostOverviewProps) {
   const [hours, setHours] = useState(24);
   const connectedHosts = hostsData.filter((h) => h.isConnected);
   const allGpus = connectedHosts.flatMap((h) => h.gpus);
@@ -257,6 +249,18 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$" 
                     hostsWithSglang > 0 ? `${hostsWithSglang} SGLang` : "",
                   ].filter(Boolean).join(" + ")
                 : undefined,
+          },
+          {
+            label: "Freshness",
+            value: fleetFreshness
+              ? `${fleetFreshness.liveHosts}/${fleetFreshness.totalHosts}`
+              : "—",
+            icon: Clock,
+            color: (fleetFreshness?.staleHosts || 0) > 0 ? "text-amber-500" : "text-emerald-500",
+            bg: (fleetFreshness?.staleHosts || 0) > 0 ? "bg-amber-500/10" : "bg-emerald-500/10",
+            sub: fleetFreshness
+              ? `${fleetFreshness.cachedHosts} cached · ${fleetFreshness.staleHosts} stale`
+              : undefined,
           },
         ].map((kpi) => {
           const Icon = kpi.icon;

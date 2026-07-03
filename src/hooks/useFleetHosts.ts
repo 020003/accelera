@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNvidiaSmi } from "@/hooks/useNvidiaSmi";
 import { proxyUrl } from "@/lib/proxy";
 import type { Host, HostData } from "@/types/dashboard";
@@ -21,7 +22,26 @@ interface RuntimeProbeStatus {
   version?: string;
 }
 
+interface FleetFreshnessSummary {
+  totalHosts: number;
+  onlineHosts: number;
+  offlineHosts: number;
+  liveHosts: number;
+  cachedHosts: number;
+  staleHosts: number;
+  oldestCacheAgeSeconds: number;
+  oldestSampleAgeSeconds: number;
+}
+
 interface FleetSnapshotResponse {
+  hosts?: HostData[];
+  freshness?: FleetFreshnessSummary;
+  fetchDurationMs?: number;
+  cacheTtlSeconds?: number;
+  runtimeCacheTtlSeconds?: number;
+}
+
+interface FleetRuntimeResponse {
   hosts?: HostData[];
 }
 
@@ -32,6 +52,7 @@ export function useFleetHosts({ demo, refreshInterval }: UseFleetHostsOptions) {
   const [ollamaStatus, setOllamaStatus] = useState<Record<string, RuntimeProbeStatus>>({});
   const [sglangStatus, setSglangStatus] = useState<Record<string, RuntimeProbeStatus>>({});
   const [vllmStatus, setVllmStatus] = useState<Record<string, RuntimeProbeStatus>>({});
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     fetch("/api/hosts", { credentials: "include" })
@@ -306,12 +327,23 @@ export function useFleetHosts({ demo, refreshInterval }: UseFleetHostsOptions) {
     }
   };
 
-  const fetchFleetSnapshot = async (): Promise<HostData[] | null> => {
+  const fetchFleetSnapshot = async (): Promise<FleetSnapshotResponse | null> => {
     try {
       const response = await fetch("/api/fleet/snapshot", { credentials: "include" });
       if (!response.ok) return null;
       const data = await response.json() as FleetSnapshotResponse;
-      return Array.isArray(data.hosts) ? data.hosts : null;
+      return Array.isArray(data.hosts) ? data : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const fetchFleetRuntime = async (): Promise<FleetRuntimeResponse | null> => {
+    try {
+      const response = await fetch("/api/fleet/runtime", { credentials: "include" });
+      if (!response.ok) return null;
+      const data = await response.json() as FleetRuntimeResponse;
+      return Array.isArray(data.hosts) ? data : null;
     } catch {
       return null;
     }
@@ -336,103 +368,22 @@ export function useFleetHosts({ demo, refreshInterval }: UseFleetHostsOptions) {
     });
   };
 
-  const fetchInProgress = useRef(false);
-
-  const fetchAllHostsData = async () => {
-    if (fetchInProgress.current) return;
-    fetchInProgress.current = true;
-    try {
-      if (demo) {
-        const demoParsed = demoData as NvidiaSmiResponse | undefined;
-        setHostsData([{
-          url: "demo",
-          name: "Demo Host",
-          isConnected: !demoError,
-          gpus: demoParsed?.gpus || [],
-          timestamp: demoParsed?.timestamp,
-          error: demoError ? "Demo mode error" : undefined,
-        }]);
-        return;
-      }
-      const snapshot = await fetchFleetSnapshot();
-      if (snapshot) {
-        applyHostSnapshots(snapshot);
-        return;
-      }
-      if (hosts.length === 0) {
-        setHostsData([]);
-        return;
-      }
-      const results = await Promise.all(hosts.map(fetchHostData));
-      setHostsData(prevData => {
-        const newData = [...prevData];
-        let hasChanges = false;
-        results.forEach((newHostData) => {
-          const existingIndex = newData.findIndex(h => h.url === newHostData.url);
-          if (existingIndex >= 0) {
-            const existing = newData[existingIndex];
-            const gpusChanged = existing.gpus.length !== newHostData.gpus.length ||
-              existing.gpus.some((gpu, i) => {
-                const newGpu = newHostData.gpus[i];
-                return !newGpu ||
-                  gpu.utilization !== newGpu.utilization ||
-                  gpu.temperature !== newGpu.temperature ||
-                  gpu.power.draw !== newGpu.power.draw ||
-                  gpu.memory.used !== newGpu.memory.used;
-              });
-            if (
-              existing.isConnected !== newHostData.isConnected ||
-              existing.error !== newHostData.error ||
-              existing.timestamp !== newHostData.timestamp ||
-              gpusChanged ||
-              (!existing.ollama && newHostData.ollama)
-            ) {
-              newData[existingIndex] = {
-                ...existing,
-                ...newHostData,
-                ollama: newHostData.ollama || existing.ollama,
-                sglang: newHostData.sglang || existing.sglang,
-                vllm: newHostData.vllm || existing.vllm,
-              };
-              hasChanges = true;
-            }
-          } else {
-            newData.push(newHostData);
-            hasChanges = true;
-          }
-        });
-        const filteredData = newData.filter(hostData =>
-          results.some(r => r.url === hostData.url)
-        );
-        if (filteredData.length !== newData.length) {
-          hasChanges = true;
-        }
-        const orderIndex = new Map<string, number>(results.map((r, i) => [r.url, i]));
-        const sorted = [...filteredData].sort(
-          (a, b) => (orderIndex.get(a.url) ?? 0) - (orderIndex.get(b.url) ?? 0)
-        );
-        const orderChanged = sorted.some((h, i) => h.url !== filteredData[i]?.url);
-        if (orderChanged) hasChanges = true;
-        return hasChanges ? sorted : prevData;
-      });
-      setHosts((prev) => {
-        const liveByUrl = new Map<string, boolean>(
-          results.map((r) => [r.url, r.isConnected])
-        );
-        let mutated = false;
-        const next = prev.map((h) => {
-          const live = liveByUrl.get(h.url) ?? false;
-          if (h.isConnected !== live) {
-            mutated = true;
-            return { ...h, isConnected: live };
-          }
-          return h;
-        });
-        return mutated ? next : prev;
-      });
-    } finally {
-      fetchInProgress.current = false;
+  const fetchSnapshotWithFallback = async (): Promise<FleetSnapshotResponse> => {
+    if (demo) {
+      const demoParsed = demoData as NvidiaSmiResponse | undefined;
+      return { hosts: [{
+        url: "demo",
+        name: "Demo Host",
+        isConnected: !demoError,
+        gpus: demoParsed?.gpus || [],
+        timestamp: demoParsed?.timestamp,
+        error: demoError ? "Demo mode error" : undefined,
+      }] };
     }
+    const snapshot = await fetchFleetSnapshot();
+    if (snapshot?.hosts) return snapshot;
+    if (hosts.length === 0) return { hosts: [] };
+    return { hosts: await Promise.all(hosts.map(fetchHostData)) };
   };
 
   const hostsKey = useMemo(
@@ -440,24 +391,57 @@ export function useFleetHosts({ demo, refreshInterval }: UseFleetHostsOptions) {
     [hosts]
   );
 
-  const fetchRef = useRef(fetchAllHostsData);
-  fetchRef.current = fetchAllHostsData;
+  const snapshotQuery = useQuery<FleetSnapshotResponse>({
+    queryKey: ["fleet-snapshot", hostsKey, demo],
+    queryFn: fetchSnapshotWithFallback,
+    enabled: demo || hostsKey.length > 0,
+    refetchInterval: refreshInterval > 0 ? refreshInterval : false,
+    staleTime: Math.max(0, Math.min(refreshInterval / 2, 1000)),
+    retry: 1,
+  });
+
+  const runtimeQuery = useQuery<FleetRuntimeResponse | null>({
+    queryKey: ["fleet-runtime", hostsKey],
+    queryFn: fetchFleetRuntime,
+    enabled: !demo && hostsKey.length > 0,
+    refetchInterval: 300_000,
+    staleTime: 240_000,
+    retry: 1,
+  });
 
   useEffect(() => {
-    if (demo || hostsKey.length > 0) {
-      fetchRef.current();
-      if (refreshInterval > 0) {
-        const interval = setInterval(() => fetchRef.current(), refreshInterval);
-        return () => clearInterval(interval);
-      }
-    }
-  }, [hostsKey, demo, refreshInterval]);
+    const snapshotHosts = snapshotQuery.data?.hosts;
+    if (!snapshotHosts) return;
+    const runtimeHosts = runtimeQuery.data?.hosts || [];
+    const runtimeByUrl = new Map(runtimeHosts.map((host) => [host.url, host]));
+    applyHostSnapshots(snapshotHosts.map((host) => {
+      const runtime = runtimeByUrl.get(host.url);
+      if (!runtime) return host;
+      return {
+        ...host,
+        ollama: runtime.ollama || host.ollama,
+        sglang: runtime.sglang || host.sglang,
+        vllm: runtime.vllm || host.vllm,
+      };
+    }));
+  }, [snapshotQuery.data, runtimeQuery.data]);
+
+  const fetchAllHostsData = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["fleet-snapshot"] }),
+      queryClient.invalidateQueries({ queryKey: ["fleet-runtime"] }),
+    ]);
+  };
 
   return {
     hosts,
     setHosts,
     hostsLoaded,
     hostsData,
+    fleetFreshness: snapshotQuery.data?.freshness,
+    fleetFetchDurationMs: snapshotQuery.data?.fetchDurationMs,
+    cacheTtlSeconds: snapshotQuery.data?.cacheTtlSeconds,
+    runtimeCacheTtlSeconds: snapshotQuery.data?.runtimeCacheTtlSeconds,
     fetchAllHostsData,
   };
 }

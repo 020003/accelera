@@ -22,6 +22,15 @@ import { toast } from "sonner";
 import { proxyUrl } from "@/lib/proxy";
 import { useTheme } from "@/hooks/useTheme";
 
+type PerformanceMode = "realtime" | "balanced" | "low-load" | "manual";
+
+const PERFORMANCE_INTERVALS: Record<PerformanceMode, number> = {
+  realtime: 2000,
+  balanced: 5000,
+  "low-load": 30000,
+  manual: 0,
+};
+
 interface HeatmapResponse {
   hosts?: unknown[];
   timestamps?: unknown[];
@@ -38,15 +47,27 @@ export default function Dashboard() {
   const [demo, setDemo] = useState<boolean>(() => 
     localStorage.getItem("gpu_monitor_demo") === "true"
   );
+  const [performanceMode, setPerformanceMode] = useState<PerformanceMode>(() =>
+    (localStorage.getItem("gpu_monitor_performance_mode") as PerformanceMode) || "balanced"
+  );
   const [refreshInterval, setRefreshInterval] = useState<number>(() => 
-    parseInt(localStorage.getItem("gpu_monitor_refresh_interval") || "5000")
+    parseInt(localStorage.getItem("gpu_monitor_refresh_interval") || String(PERFORMANCE_INTERVALS.balanced))
   );
   const [energyRate, setEnergyRate] = useState<number>(() => 
     parseFloat(localStorage.getItem("gpu_monitor_energy_rate") || "0")
   );
   const { currency, setCurrency } = useCurrency();
   const { theme, toggle: toggleTheme } = useTheme();
-  const { hosts, setHosts, hostsData, fetchAllHostsData } = useFleetHosts({ demo, refreshInterval });
+  const {
+    hosts,
+    setHosts,
+    hostsData,
+    fleetFreshness,
+    fleetFetchDurationMs,
+    cacheTtlSeconds,
+    runtimeCacheTtlSeconds,
+    fetchAllHostsData,
+  } = useFleetHosts({ demo, refreshInterval });
   const [activeTab, setActiveTab] = useState("overview");
   const { data: topologyData } = useTopology();
   const [heatmapData, setHeatmapData] = useState(null);
@@ -131,6 +152,19 @@ export default function Dashboard() {
     const interval = parseInt(value);
     setRefreshInterval(interval);
     localStorage.setItem("gpu_monitor_refresh_interval", interval.toString());
+    const matchingMode = Object.entries(PERFORMANCE_INTERVALS).find(([, ms]) => ms === interval)?.[0] as PerformanceMode | undefined;
+    if (matchingMode) {
+      setPerformanceMode(matchingMode);
+      localStorage.setItem("gpu_monitor_performance_mode", matchingMode);
+    }
+  };
+
+  const handlePerformanceMode = (mode: PerformanceMode) => {
+    setPerformanceMode(mode);
+    localStorage.setItem("gpu_monitor_performance_mode", mode);
+    const interval = PERFORMANCE_INTERVALS[mode];
+    setRefreshInterval(interval);
+    localStorage.setItem("gpu_monitor_refresh_interval", interval.toString());
   };
 
   const handleEnergyRate = (value: string) => {
@@ -176,6 +210,10 @@ export default function Dashboard() {
         totalAiModels={totalAiModels}
         hostsWithOllama={hostsWithOllama}
         hostsWithSglang={hostsWithSglang}
+        performanceMode={performanceMode}
+        refreshInterval={refreshInterval}
+        fleetFetchDurationMs={fleetFetchDurationMs}
+        fleetFreshness={fleetFreshness}
       />
 
       <main className="container mx-auto px-4 py-6 space-y-6">
@@ -250,7 +288,12 @@ export default function Dashboard() {
               </Card>
             ) : (
               <>
-                <MultiHostOverview hostsData={hostsData} energyRate={energyRate} currencySymbol={currency.symbol} />
+                <MultiHostOverview
+                  hostsData={hostsData}
+                  energyRate={energyRate}
+                  currencySymbol={currency.symbol}
+                  fleetFreshness={fleetFreshness}
+                />
                 <PowerUsageChart 
                   hosts={hosts} 
                   hostData={hostDataMap} 
@@ -346,6 +389,10 @@ export default function Dashboard() {
             <SettingsTab
               refreshInterval={refreshInterval}
               handleRefreshInterval={handleRefreshInterval}
+              performanceMode={performanceMode}
+              handlePerformanceMode={handlePerformanceMode}
+              cacheTtlSeconds={cacheTtlSeconds}
+              runtimeCacheTtlSeconds={runtimeCacheTtlSeconds}
               energyRate={energyRate}
               handleEnergyRate={handleEnergyRate}
               demo={demo}
