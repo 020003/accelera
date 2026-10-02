@@ -6,9 +6,7 @@ services:
     restart: unless-stopped
     ports:
       - "${EXPORTER_PORT:-5000}:5000"
-    env_file:
-      - path: .env
-        required: false
+    env_file: .env
     environment:
       - FLASK_ENV=production
       - FLASK_HOST=0.0.0.0
@@ -29,7 +27,7 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:5000/health"]
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:5000/health"]
       interval: 30s
       timeout: 5s
       retries: 3

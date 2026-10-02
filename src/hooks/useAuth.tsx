@@ -14,6 +14,7 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
+import { apiFetch, setCsrfToken } from "@/lib/api";
 
 interface AuthContextValue {
   /** True when the user has a valid server session */
@@ -37,10 +38,9 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 async function _post(url: string, body: Record<string, unknown>) {
-  return fetch(url, {
+  return apiFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    credentials: "include",
     body: JSON.stringify(body),
   });
 }
@@ -60,8 +60,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsAuthenticated(data.authenticated ?? false);
         setNeedsSetup(data.needsSetup ?? false);
         setUsername(data.username ?? null);
+        setCsrfToken(data.csrfToken);
       })
       .catch(() => {
+        setCsrfToken(null);
         setIsAuthenticated(false);
       })
       .finally(() => setLoading(false));
@@ -75,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (res.ok) {
         setIsAuthenticated(true);
         setUsername(data.username);
+        setCsrfToken(data.csrfToken);
         return true;
       }
       setError(data.error || "Login failed");
@@ -87,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await _post("/api/auth/logout", {}).catch(() => {});
+    setCsrfToken(null);
     setIsAuthenticated(false);
     setUsername(null);
   }, []);
@@ -100,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsAuthenticated(true);
         setNeedsSetup(false);
         setUsername(data.username);
+        setCsrfToken(data.csrfToken);
         return true;
       }
       setError(data.error || "Setup failed");

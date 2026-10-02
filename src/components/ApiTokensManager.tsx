@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api";
 import { Copy, Plus, Trash2, KeyRound, Check } from "lucide-react";
 
 interface ApiToken {
@@ -52,7 +53,7 @@ export function ApiTokensManager() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/tokens", { credentials: "include" });
+      const res = await apiFetch("/api/auth/tokens");
       if (!res.ok) throw new Error(`${res.status}`);
       const data = await res.json();
       setTokens(data.tokens || []);
@@ -73,7 +74,7 @@ export function ApiTokensManager() {
     setCreating(true);
     try {
       const days = EXPIRY_OPTIONS[parseInt(expiresIdx)]?.days ?? null;
-      const res = await fetch("/api/auth/tokens", {
+      const res = await apiFetch("/api/auth/tokens", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -103,7 +104,7 @@ export function ApiTokensManager() {
   const revoke = async (id: string, label: string) => {
     if (!confirm(`Revoke token "${label}"?  This cannot be undone.`)) return;
     try {
-      const res = await fetch(`/api/auth/tokens/${id}`, {
+      const res = await apiFetch(`/api/auth/tokens/${id}`, {
         method: "DELETE",
         credentials: "include",
       });

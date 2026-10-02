@@ -23,6 +23,7 @@ interface DashboardHeaderProps {
   totalAiModels: number;
   hostsWithOllama: number;
   hostsWithSglang: number;
+  hostsWithVllm: number;
   performanceMode: string;
   refreshInterval: number;
   fleetFetchDurationMs?: number;
@@ -38,6 +39,7 @@ export function DashboardHeader({
   totalAiModels,
   hostsWithOllama,
   hostsWithSglang,
+  hostsWithVllm,
   performanceMode,
   refreshInterval,
   fleetFetchDurationMs,
@@ -45,32 +47,35 @@ export function DashboardHeader({
 }: DashboardHeaderProps) {
   const staleHosts = fleetFreshness?.staleHosts || 0;
   const cachedHosts = fleetFreshness?.cachedHosts || 0;
+  const runtimeHosts = hostsWithOllama + hostsWithSglang + hostsWithVllm;
+  const online = connectedHosts.length > 0 || runtimeHosts > 0;
 
   return (
-    <header className="navbar">
-      <div className="container mx-auto px-4 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
+    <header className="navbar border-white/5">
+      <div className="mx-auto max-w-[1800px] px-4 py-3 sm:px-6">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
             <img
               src="/logo.png"
               alt="Accelera"
-              className="h-9 sm:h-12 w-auto"
+              className="h-10 w-auto drop-shadow-[0_0_18px_hsl(var(--primary)/0.3)]"
             />
-            <div>
-              <h1 className="text-xl sm:text-2xl font-bold text-foreground">Accelera</h1>
-              <p className="text-sm text-muted-foreground hidden sm:block">
-                High-Performance GPU Acceleration Platform
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-bold tracking-tight text-foreground sm:text-xl">Accelera</h1>
+                <Badge variant="outline" className="hidden border-primary/20 bg-primary/10 text-[9px] uppercase tracking-[0.16em] text-primary sm:inline-flex">Control plane</Badge>
+              </div>
+              <p className="hidden truncate text-xs text-muted-foreground sm:block">
+                GPU infrastructure and inference operations
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-4">
-            <div className="hidden xl:flex items-center gap-3 text-sm text-muted-foreground">
-              <span><span className="font-medium">Hosts:</span> {connectedHosts.length}/{hostsData.length}</span>
-              <span><span className="font-medium">GPUs:</span> {totalGpus}</span>
-              {totalAiModels > 0 && (
-                <span><span className="font-medium">AI Models:</span> {totalAiModels}</span>
-              )}
+          <div className="flex items-center gap-2">
+            <div className="hidden items-center gap-1.5 rounded-xl border border-border/60 bg-background/45 p-1.5 xl:flex">
+              <HeaderMetric label="Hosts" value={`${connectedHosts.length}/${hostsData.length}`} />
+              <HeaderMetric label="GPUs" value={totalGpus.toString()} />
+              {totalAiModels > 0 && <HeaderMetric label="Models" value={totalAiModels.toString()} />}
               <Badge variant="outline" className="gap-1 text-[11px] capitalize">
                 <Timer className="h-3 w-3" />
                 {performanceMode.replace("-", " ")} · {refreshInterval > 0 ? `${refreshInterval / 1000}s` : "manual"}
@@ -96,19 +101,26 @@ export function DashboardHeader({
             >
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
-            <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-sm ${
-              (connectedHosts.length > 0 || hostsWithOllama > 0 || hostsWithSglang > 0)
-                ? "bg-accelera-green/10 text-accelera-green"
-                : "bg-red-500/10 text-red-500"
+            <div className={`flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium ${
+              online
+                ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-500"
+                : "border-red-500/20 bg-red-500/10 text-red-500"
             }`}>
-              <div className={`w-2 h-2 rounded-full ${
-                (connectedHosts.length > 0 || hostsWithOllama > 0 || hostsWithSglang > 0) ? "bg-accelera-green animate-pulse-slow" : "bg-red-500"
-              }`} />
-              {(connectedHosts.length > 0 || hostsWithOllama > 0 || hostsWithSglang > 0) ? "Online" : "Offline"}
+              <div className={`h-1.5 w-1.5 rounded-full ${online ? "bg-emerald-500 animate-pulse-slow" : "bg-red-500"}`} />
+              {online ? "Operational" : "Offline"}
             </div>
           </div>
         </div>
       </div>
     </header>
+  );
+}
+
+function HeaderMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-16 rounded-lg px-2.5 py-1 text-center">
+      <div className="font-mono text-sm font-bold leading-none">{value}</div>
+      <div className="mt-1 text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
+    </div>
   );
 }

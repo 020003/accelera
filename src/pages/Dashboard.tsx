@@ -195,7 +195,7 @@ export default function Dashboard() {
   const hostsWithVllm = hostsData.filter(h => h.vllm?.isAvailable).length;
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="dashboard-canvas min-h-screen bg-background">
       <Helmet>
         <title>Accelera - High-Performance GPU Acceleration Platform</title>
         <meta name="description" content="Professional GPU acceleration platform for NVIDIA graphics cards with advanced AI workload management, real-time monitoring, and performance optimization." />
@@ -210,31 +210,33 @@ export default function Dashboard() {
         totalAiModels={totalAiModels}
         hostsWithOllama={hostsWithOllama}
         hostsWithSglang={hostsWithSglang}
+        hostsWithVllm={hostsWithVllm}
         performanceMode={performanceMode}
         refreshInterval={refreshInterval}
         fleetFetchDurationMs={fleetFetchDurationMs}
         fleetFreshness={fleetFreshness}
       />
 
-      <main className="container mx-auto px-4 py-6 space-y-6">
+      <main className="mx-auto max-w-[1800px] space-y-6 px-4 py-5 sm:px-6 sm:py-6">
 
         {/* Tabbed Interface */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="flex w-full overflow-x-auto">
-            <TabsTrigger value="overview" className="flex items-center gap-2">
+          <div className="sticky top-[65px] z-40 -mx-1 overflow-x-auto px-1 pb-1">
+          <TabsList className="nav-strip flex h-auto min-w-max flex-nowrap justify-start gap-1 rounded-xl p-1.5">
+            <TabsTrigger value="overview" className="h-9 shrink-0 gap-1.5 rounded-lg px-3 text-xs data-[state=active]:shadow-sm">
               <BarChart3 className="h-4 w-4" />
               Overview
             </TabsTrigger>
-            <TabsTrigger value="visualizations" className="flex items-center gap-2">
+            <TabsTrigger value="visualizations" className="h-9 shrink-0 gap-1.5 rounded-lg px-3 text-xs data-[state=active]:shadow-sm">
               <TrendingUp className="h-4 w-4" />
               Advanced Visualizations
             </TabsTrigger>
-            <TabsTrigger value="costs" className="flex items-center gap-2">
+            <TabsTrigger value="costs" className="h-9 shrink-0 gap-1.5 rounded-lg px-3 text-xs data-[state=active]:shadow-sm">
               <DollarSign className="h-4 w-4" />
               Cost Analysis
             </TabsTrigger>
             {hostsData.map((host) => (
-              <TabsTrigger key={host.url} value={host.url} className="flex items-center gap-1.5">
+              <TabsTrigger key={host.url} value={host.url} className="h-9 shrink-0 gap-1.5 rounded-lg px-3 text-xs data-[state=active]:shadow-sm">
                 <Monitor className="h-4 w-4" />
                 {host.name}
                 {host.isConnected && (
@@ -251,19 +253,20 @@ export default function Dashboard() {
                 )}
               </TabsTrigger>
             ))}
-            <TabsTrigger value="alerts" className="flex items-center gap-2">
+            <TabsTrigger value="alerts" className="h-9 shrink-0 gap-1.5 rounded-lg px-3 text-xs data-[state=active]:shadow-sm">
               <Bell className="h-4 w-4" />
               Alerts
             </TabsTrigger>
-            <TabsTrigger value="gpu-events" className="flex items-center gap-2">
+            <TabsTrigger value="gpu-events" className="h-9 shrink-0 gap-1.5 rounded-lg px-3 text-xs data-[state=active]:shadow-sm">
               <ShieldAlert className="h-4 w-4" />
               GPU Health
             </TabsTrigger>
-            <TabsTrigger value="settings" className="flex items-center gap-2">
+            <TabsTrigger value="settings" className="h-9 shrink-0 gap-1.5 rounded-lg px-3 text-xs data-[state=active]:shadow-sm">
               <Cog className="h-4 w-4" />
               Settings
             </TabsTrigger>
           </TabsList>
+          </div>
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="space-y-6">
@@ -319,6 +322,7 @@ export default function Dashboard() {
             <VisualizationsTab
               topologyData={topologyData}
               hosts={hosts}
+              liveHosts={hostsData}
               heatmapData={heatmapData}
               heatmapHours={heatmapHours}
               setHeatmapHours={setHeatmapHours}

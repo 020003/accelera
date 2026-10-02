@@ -141,8 +141,13 @@ function HostFabricRow({ host, result }: { host: Host; result?: FabricResult }) 
             </Badge>
           </div>
           <SplitBar tx={p.tx_bps} rx={p.rx_bps} line={p.rate_gbps} />
-          <div className="text-[10px] text-muted-foreground tabular-nums hidden xl:block min-w-[140px] text-right">
-            Σ {fmtBytes(p.tx_bytes)}↑ / {fmtBytes(p.rx_bytes)}↓
+          <div className="text-[10px] text-muted-foreground tabular-nums hidden xl:block min-w-[190px] text-right">
+            {p.rdma_available && (
+              <div className="text-violet-500" title="Transport-level RDMA activity. It is NCCL-compatible traffic, not per-job attribution.">
+                RDMA {fmtBps(p.rdma_tx_bps || 0)}↑ / {fmtBps(p.rdma_rx_bps || 0)}↓
+              </div>
+            )}
+            <div>Σ {fmtBytes(p.tx_bytes)}↑ / {fmtBytes(p.rx_bytes)}↓</div>
           </div>
         </div>
       ))}
@@ -165,8 +170,9 @@ function HostFabricRow({ host, result }: { host: Host; result?: FabricResult }) 
               <span className="h-1.5 w-1.5 rounded-full bg-amber-500/70" />
               <span className="font-mono">{p.device}/{p.port}</span>
               <span className="opacity-70">
-                {p.link_layer === "Ethernet" ? "RoCE" : "IB"}·{p.rate_gbps}Gb idle
+                {p.link_layer === "Ethernet" ? "RoCE" : "IB"}·{p.rate_gbps}Gb no traffic sampled
               </span>
+              {p.rdma_available && <span className="text-violet-500/80">RDMA counters available</span>}
             </span>
           ))}
           {nvlIdleActive.map((l) => (
@@ -197,7 +203,7 @@ function HostFabricRow({ host, result }: { host: Host; result?: FabricResult }) 
 }
 
 export function FabricActivityPanel({ hosts }: Props) {
-  const results = useFabricLive(hosts.map((h) => h.url), 3000);
+  const results = useFabricLive(hosts, 3000);
 
   // Aggregate fleet totals
   const fleetTx = results.reduce(

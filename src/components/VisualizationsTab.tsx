@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { FabricActivityPanel } from "@/components/FabricActivityPanel";
+import type { HostData } from "@/types/dashboard";
 
 const GPUTopologyMap = lazy(() =>
   import("@/components/GPUTopologyMap").then((m) => ({ default: m.GPUTopologyMap }))
@@ -26,6 +27,7 @@ const GPU3DHeatmap = lazy(() =>
 interface VisualizationsTabProps {
   topologyData: any;
   hosts?: { url: string; name: string }[];
+  liveHosts?: HostData[];
   heatmapData: any;
   heatmapHours: number;
   setHeatmapHours: (h: number) => void;
@@ -63,6 +65,7 @@ function VizEmpty({ text }: { text: string }) {
 export function VisualizationsTab({
   topologyData,
   hosts = [],
+  liveHosts = [],
   heatmapData,
   heatmapHours,
   setHeatmapHours,
@@ -119,7 +122,7 @@ export function VisualizationsTab({
         </div>
         <FabricActivityPanel hosts={hosts} />
         <Suspense fallback={<VizLoading text="Loading topology..." />}>
-          <GPUTopologyMap data={topologyData} />
+          <GPUTopologyMap data={topologyData} hosts={hosts} liveHosts={liveHosts} />
         </Suspense>
       </TabsContent>
 

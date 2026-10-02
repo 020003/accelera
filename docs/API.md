@@ -146,6 +146,18 @@ Get GPU interconnect topology information.
 }
 ```
 
+### Fabric Telemetry
+
+#### GET /api/fabric/live
+
+Returns live NVLink and InfiniBand/RoCE telemetry for one GPU exporter. Each InfiniBand port includes logical and physical state, negotiated rate, link layer, backing netdev, live TX/RX and RDMA rates, cumulative counters, error counters, and up to eight nonzero GIDs and P_Keys.
+
+#### GET /api/fleet/fabric
+
+Authenticated central-dashboard endpoint that aggregates `GET /api/fabric/live` across configured GPU hosts. Dashboard clients should use this endpoint rather than querying exporters directly. It returns configured host identity, per-host success/error state, fetch timing, and the exporter telemetry payload.
+
+For RoCE/Ethernet ports, `lid` and `sm_lid` are normally `0x0` and should be treated as not applicable rather than as a fault. RDMA activity is transport-level inference and is not per-NCCL-job or per-rank attribution.
+
 ### Historical Data
 
 #### GET /api/heatmap

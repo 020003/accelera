@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { proxyUrl } from '@/lib/proxy';
 import type { 
   OllamaModel, 
@@ -269,20 +268,4 @@ export function useOllama({ hosts, refreshInterval = 5000, enabled = true }: Use
     getTotalModels,
     getAveragePerformance
   };
-}
-
-// React Query integration for caching
-export function useOllamaQuery(options: UseOllamaOptions) {
-  const queryKey = ['ollama', options.hosts, options.refreshInterval];
-  
-  return useQuery({
-    queryKey,
-    queryFn: async () => {
-      const { hostsData } = useOllama(options);
-      return hostsData;
-    },
-    refetchInterval: options.refreshInterval,
-    enabled: options.enabled,
-    staleTime: options.refreshInterval ? options.refreshInterval / 2 : 30000
-  });
 }

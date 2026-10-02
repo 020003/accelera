@@ -30,14 +30,13 @@ for host in "${HOSTS[@]}"; do
     
     # Copy necessary files
     echo "Copying files to ${host}..."
-    ssh ${REMOTE_USER}@${host} "mkdir -p ~/gpu-dash-glow/server"
+    ssh ${REMOTE_USER}@${host} "mkdir -p ~/gpu-dash-glow/server && touch ~/gpu-dash-glow/.env"
     scp -r server/* ${REMOTE_USER}@${host}:~/gpu-dash-glow/server/
     scp docker-compose.gpu-exporter.yml ${REMOTE_USER}@${host}:~/gpu-dash-glow/
     
     # Deploy with docker-compose
     echo "Starting Docker container on ${host}..."
-    ssh ${REMOTE_USER}@${host} "cd ~/gpu-dash-glow && docker-compose -f docker-compose.gpu-exporter.yml down"
-    ssh ${REMOTE_USER}@${host} "cd ~/gpu-dash-glow && docker-compose -f docker-compose.gpu-exporter.yml up -d --build"
+    ssh ${REMOTE_USER}@${host} "cd ~/gpu-dash-glow && if docker compose version >/dev/null 2>&1; then docker compose -f docker-compose.gpu-exporter.yml down && docker compose -f docker-compose.gpu-exporter.yml up -d --build; else docker-compose -f docker-compose.gpu-exporter.yml down && docker-compose -f docker-compose.gpu-exporter.yml up -d --build; fi"
     
     # Check deployment status
     echo "Checking deployment status on ${host}..."

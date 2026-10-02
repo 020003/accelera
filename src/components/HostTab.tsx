@@ -6,7 +6,8 @@ import { GpuCard } from "./GpuCard";
 import { TokenStatsCard } from "./TokenStatsCard";
 import { BenchmarkRunner } from "./BenchmarkRunner";
 import { ProcessInspector } from "./ProcessInspector";
-import { useTokenStats } from "@/hooks/useTokenStats";
+import { VllmOperationsPanel } from "./VllmOperationsPanel";
+import { useLLMStatus, useTokenStats } from "@/hooks/useTokenStats";
 import {
   Server,
   AlertTriangle,
@@ -99,6 +100,7 @@ export function HostTab({
 }: HostTabProps) {
   const [tokenHours, setTokenHours] = useState(24);
   const { data: tokenStats, isLoading: tokenLoading } = useTokenStats(hostUrl, tokenHours);
+  const { data: llmStatus } = useLLMStatus(hostUrl, Boolean(vllm?.isAvailable));
 
   // Compute aggregate GPU stats
   const totalGpus = gpus.length;
@@ -125,13 +127,13 @@ export function HostTab({
   return (
     <div className="space-y-5">
       {/* ── Compact Header ── */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="surface-panel flex flex-col gap-4 rounded-2xl border p-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
           <div className="p-2 bg-emerald/10 rounded-lg">
             <Server className="h-5 w-5 text-emerald" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold flex items-center gap-2">
+            <h2 className="flex flex-wrap items-center gap-2 text-lg font-semibold">
               {hostName}
               <Badge
                 variant={isConnected ? "default" : "secondary"}
@@ -180,7 +182,7 @@ export function HostTab({
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center justify-end gap-3">
           {timestamp && isConnected && (
             <span className="text-xs text-muted-foreground hidden sm:inline">
               {new Date(timestamp).toLocaleTimeString()}
@@ -302,39 +304,39 @@ export function HostTab({
 
           {/* Tabbed content */}
           <Tabs defaultValue="gpus" className="space-y-4">
-            <TabsList>
-              <TabsTrigger value="gpus" className="gap-1.5 text-xs">
+            <TabsList className="h-auto w-full justify-start overflow-x-auto rounded-xl p-1.5">
+              <TabsTrigger value="gpus" className="h-8 shrink-0 gap-1.5 rounded-lg px-3 text-xs">
                 <Cpu className="h-3.5 w-3.5" />
                 GPUs ({gpus.length})
               </TabsTrigger>
-              <TabsTrigger value="tokens" className="gap-1.5 text-xs">
+              <TabsTrigger value="tokens" className="h-8 shrink-0 gap-1.5 rounded-lg px-3 text-xs">
                 <Activity className="h-3.5 w-3.5" />
                 Token Usage
               </TabsTrigger>
               {ollama?.isAvailable && (
-                <TabsTrigger value="ollama" className="gap-1.5 text-xs">
+                <TabsTrigger value="ollama" className="h-8 shrink-0 gap-1.5 rounded-lg px-3 text-xs">
                   <Bot className="h-3.5 w-3.5" />
                   Ollama ({ollama.models.length})
                 </TabsTrigger>
               )}
               {sglang?.isAvailable && (
-                <TabsTrigger value="sglang" className="gap-1.5 text-xs">
+                <TabsTrigger value="sglang" className="h-8 shrink-0 gap-1.5 rounded-lg px-3 text-xs">
                   <Sparkles className="h-3.5 w-3.5" />
                   SGLang ({sglang.models.length})
                 </TabsTrigger>
               )}
               {vllm?.isAvailable && (
-                <TabsTrigger value="vllm" className="gap-1.5 text-xs">
+                <TabsTrigger value="vllm" className="h-8 shrink-0 gap-1.5 rounded-lg px-3 text-xs">
                   <Zap className="h-3.5 w-3.5" />
                   vLLM ({vllm.models.length})
                 </TabsTrigger>
               )}
-              <TabsTrigger value="processes" className="gap-1.5 text-xs">
+              <TabsTrigger value="processes" className="h-8 shrink-0 gap-1.5 rounded-lg px-3 text-xs">
                 <Terminal className="h-3.5 w-3.5" />
                 Processes
               </TabsTrigger>
               {(ollama?.isAvailable || sglang?.isAvailable || vllm?.isAvailable) && (
-                <TabsTrigger value="benchmark" className="gap-1.5 text-xs">
+                <TabsTrigger value="benchmark" className="h-8 shrink-0 gap-1.5 rounded-lg px-3 text-xs">
                   <Timer className="h-3.5 w-3.5" />
                   Benchmark
                 </TabsTrigger>
@@ -373,7 +375,7 @@ export function HostTab({
                 </ToggleGroup>
               </div>
               {tokenStats ? (
-                <TokenStatsCard stats={tokenStats} isLoading={tokenLoading} hours={tokenHours} />
+                <TokenStatsCard stats={tokenStats} llmStatus={llmStatus} isLoading={tokenLoading} hours={tokenHours} />
               ) : tokenLoading ? (
                 <Card>
                   <CardContent className="py-12 text-center text-muted-foreground text-sm">
@@ -386,7 +388,7 @@ export function HostTab({
                     Token statistics are not available for this host.
                     <br />
                     <span className="text-xs">
-                      Ensure the exporter can reach Ollama on localhost:11434.
+                      Ensure the exporter can reach the configured Ollama, SGLang, or vLLM metrics endpoint.
                     </span>
                   </CardContent>
                 </Card>
@@ -450,41 +452,8 @@ export function HostTab({
             )}
 
             {vllm?.isAvailable && (
-              <TabsContent value="vllm">
-                {vllm.models.length === 0 ? (
-                  <Card>
-                    <CardContent className="flex flex-col items-center justify-center py-12">
-                      <Zap className="h-10 w-10 text-muted-foreground mb-3" />
-                      <p className="text-sm font-medium">No Models Loaded</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        No models are currently loaded in vLLM.
-                      </p>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                    {vllm.models.map((model) => (
-                      <Card
-                        key={modelLabel(model)}
-                        className="shadow-none border-border/50"
-                      >
-                        <CardContent className="p-4 flex items-center gap-3">
-                          <div className="p-2 rounded-md bg-orange-500/10">
-                            <Zap className="h-4 w-4 text-orange-500" />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium truncate">
-                              {modelLabel(model)}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              vLLM{vllm.version ? ` v${vllm.version}` : ""}
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
+              <TabsContent value="vllm" forceMount className="data-[state=inactive]:hidden">
+                <VllmOperationsPanel status={llmStatus} discovery={vllm} />
               </TabsContent>
             )}
 

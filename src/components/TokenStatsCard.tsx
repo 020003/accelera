@@ -15,11 +15,14 @@ import {
   Hash,
   TrendingUp,
   Bot,
+  Activity,
+  ListOrdered,
 } from "lucide-react";
-import type { TokenStats } from "@/hooks/useTokenStats";
+import type { LLMStatus, TokenStats } from "@/hooks/useTokenStats";
 
 interface TokenStatsCardProps {
   stats: TokenStats;
+  llmStatus?: LLMStatus;
   isLoading?: boolean;
   hours?: number;
 }
@@ -36,7 +39,7 @@ function formatDuration(sec: number): string {
   return `${(sec / 3600).toFixed(1)}h`;
 }
 
-export function TokenStatsCard({ stats, isLoading, hours = 24 }: TokenStatsCardProps) {
+export function TokenStatsCard({ stats, llmStatus, isLoading, hours = 24 }: TokenStatsCardProps) {
   const windowLabel = hours <= 24 ? `${hours}h` : `${hours / 24}d`;
   const { summary, models, history } = stats;
   const modelNames = Object.keys(models);
@@ -49,7 +52,7 @@ export function TokenStatsCard({ stats, isLoading, hours = 24 }: TokenStatsCardP
 
   const kpis = [
     {
-      label: "All-time Tokens",
+      label: "Observed Tokens",
       value: formatNumber(cumTokens),
       sub: `${formatNumber(cumPt)} prompt · ${formatNumber(cumGen)} generated`,
       icon: Hash,
@@ -77,12 +80,28 @@ export function TokenStatsCard({ stats, isLoading, hours = 24 }: TokenStatsCardP
       bg: "bg-emerald-500/10",
     },
     {
-      label: "Models Tracked",
-      value: modelNames.length.toString(),
-      sub: modelNames.slice(0, 2).join(", ") + (modelNames.length > 2 ? ` +${modelNames.length - 2}` : ""),
-      icon: Bot,
+      label: "Avg Request Latency",
+      value: formatDuration(summary.avg_request_latency_sec),
+      sub: `${summary.requests_per_minute.toFixed(1)} requests/min`,
+      icon: Activity,
       color: "text-purple-500",
       bg: "bg-purple-500/10",
+    },
+    {
+      label: "Tokens / Request",
+      value: summary.avg_tokens_per_request.toFixed(1),
+      sub: `${summary.prompt_to_generated_ratio.toFixed(2)} prompt/output ratio`,
+      icon: Bot,
+      color: "text-cyan-500",
+      bg: "bg-cyan-500/10",
+    },
+    {
+      label: "Peak Output Rate",
+      value: summary.peak_generation_tps.toFixed(1),
+      sub: `tok/s · ${modelNames.length} models tracked`,
+      icon: TrendingUp,
+      color: "text-rose-500",
+      bg: "bg-rose-500/10",
     },
   ];
 
@@ -126,7 +145,7 @@ export function TokenStatsCard({ stats, isLoading, hours = 24 }: TokenStatsCardP
       </CardHeader>
       <CardContent className="space-y-4">
         {/* KPI Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
           {kpis.map((kpi) => {
             const Icon = kpi.icon;
             return (
@@ -152,6 +171,32 @@ export function TokenStatsCard({ stats, isLoading, hours = 24 }: TokenStatsCardP
             );
           })}
         </div>
+
+        {llmStatus?.available && (
+          <div className="rounded-lg border border-border/60 bg-muted/20 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-medium">
+                <ListOrdered className="h-4 w-4 text-indigo-500" />
+                Live vLLM Scheduler
+              </div>
+              <Badge variant={llmStatus.scheduler.waiting > 0 ? "secondary" : "outline"} className="text-[10px] font-mono">
+                {llmStatus.scheduler.running + llmStatus.scheduler.waiting} active
+              </Badge>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+              <LiveMetric label="Processing" value={llmStatus.scheduler.running.toString()} detail="running requests" color="text-emerald-500" />
+              <LiveMetric label="Waiting" value={llmStatus.scheduler.waiting.toString()} detail={`${llmStatus.scheduler.swapped} swapped`} color={llmStatus.scheduler.waiting > 0 ? "text-amber-500" : "text-muted-foreground"} />
+              <LiveMetric label="Live Throughput" value={`${llmStatus.throughput.total_tokens_per_second.toFixed(1)} t/s`} detail={`${llmStatus.throughput.generation_tokens_per_second.toFixed(1)} output`} color="text-blue-500" />
+              <LiveMetric label="GPU KV Cache" value={`${llmStatus.cache.gpu_usage_pct.toFixed(1)}%`} detail={`${llmStatus.cache.cpu_usage_pct.toFixed(1)}% CPU cache`} color={llmStatus.cache.gpu_usage_pct >= 90 ? "text-red-500" : "text-purple-500"} />
+            </div>
+            <div className="flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-muted-foreground font-mono">
+              <span>prefix cache {llmStatus.prefix_cache.hit_rate_pct.toFixed(1)}%</span>
+              <span>{formatNumber(llmStatus.prefix_cache.hits)}/{formatNumber(llmStatus.prefix_cache.queries)} hits</span>
+              <span className={llmStatus.preemptions > 0 ? "text-amber-500" : ""}>{formatNumber(llmStatus.preemptions)} preemptions</span>
+              <span>{formatNumber(llmStatus.counters.successful_requests)} completed</span>
+            </div>
+          </div>
+        )}
 
         {/* Chart */}
         {chartData.length > 1 && (
@@ -232,6 +277,9 @@ export function TokenStatsCard({ stats, isLoading, hours = 24 }: TokenStatsCardP
                         <span className="font-mono text-blue-400">+{formatNumber(windowTotal)}</span>
                       )}
                       <span className="font-mono">{m.cumulative_requests ?? m.requests} req</span>
+                      {(m.avg_latency_sec ?? 0) > 0 && (
+                        <span className="font-mono">{formatDuration(m.avg_latency_sec ?? 0)} avg</span>
+                      )}
                       {m.avg_tokens_per_sec > 0 && (
                         <span className="font-mono text-amber-500">{m.avg_tokens_per_sec} t/s</span>
                       )}
@@ -248,10 +296,20 @@ export function TokenStatsCard({ stats, isLoading, hours = 24 }: TokenStatsCardP
           <div className="text-center py-6 text-muted-foreground">
             <Clock className="h-8 w-8 mx-auto mb-2 opacity-40" />
             <p className="text-sm">No token activity recorded yet</p>
-            <p className="text-xs mt-1">Statistics populate as Ollama processes requests</p>
+            <p className="text-xs mt-1">Statistics populate as Ollama, SGLang, or vLLM processes requests</p>
           </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function LiveMetric({ label, value, detail, color }: { label: string; value: string; detail: string; color: string }) {
+  return (
+    <div className="rounded-md bg-background/70 px-3 py-2">
+      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className={`text-lg font-bold font-mono leading-tight ${color}`}>{value}</div>
+      <div className="text-[10px] text-muted-foreground">{detail}</div>
+    </div>
   );
 }

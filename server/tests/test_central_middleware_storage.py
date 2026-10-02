@@ -28,6 +28,7 @@ def _load_middleware(storage_module):
     flask.Flask = object
     flask.jsonify = lambda value=None, *args, **kwargs: value
     flask.request = types.SimpleNamespace(path="/", method="GET", headers={}, remote_addr="127.0.0.1")
+    flask.session = {}
     sys.modules["flask"] = flask
     sys.modules["storage"] = storage_module
     spec = importlib.util.spec_from_file_location("central_middleware_under_test", CENTRAL / "middleware.py")

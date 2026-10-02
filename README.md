@@ -24,9 +24,10 @@ Real-time monitoring, AI workload management, and cluster analytics for NVIDIA G
 ### AI Workload Integration
 - **Ollama auto-discovery** — detects running Ollama instances on each GPU host
 - **SGLang auto-discovery** — detects SGLang Runtime servers (OpenAI-compatible `/v1/models`)
-- **Token statistics** — collected from Ollama Prometheus metrics, stored in SQLite, served via `/api/tokens/stats`
-- **Per-model breakdown** — generated tokens, prompt tokens, requests, avg tokens/sec per model
-- **Time-series charts** — 5-minute bucket token history with Recharts area/bar charts
+- **Token statistics** — label-aware, reset-safe counters from Ollama, SGLang, and vLLM Prometheus metrics, stored in SQLite and served via `/api/tokens/stats`
+- **Live vLLM scheduler** — processing/waiting/swapped requests, per-instance queue aggregation, KV-cache pressure, prefix-cache hit rate, preemptions, and live throughput
+- **Per-model breakdown** — generated/prompt tokens, requests, latency, tokens per request, and output throughput per model
+- **Time-series charts** — adaptive bucket token history with correct window-boundary attribution
 
 ### Advanced Visualizations
 - **GPU topology map** — interactive ReactFlow diagram showing NVLink / SXM / PCIe interconnections
@@ -48,8 +49,9 @@ Real-time monitoring, AI workload management, and cluster analytics for NVIDIA G
 - **Enriched GPU cards** — process list on GPU cards shows resolved names, runtime badges, and model info
 
 ### AI Model Benchmark Runner
-- **One-click benchmarks** — test Ollama, SGLang, and vLLM model throughput with preset prompts
-- **Key metrics** — tokens/sec, time-to-first-token, generated tokens, total duration
+- **One-click benchmarks** — streaming tests for Ollama, SGLang, and vLLM with runtime-reported token counts
+- **Accurate latency metrics** — real time-to-first-token, output-phase tokens/sec, end-to-end throughput, and total duration
+- **Server-side mixed load** — weighted workloads with bounded concurrency, aggregate output/total throughput, RPS, TTFT, and p50/p95/p99 latency
 - **Benchmark history** — results persisted in SQLite, viewable in a collapsible table
 
 ### Alerting & Events
@@ -289,7 +291,8 @@ See [`.env.example`](.env.example) for the full list.
 | `GET` | `/api/fabric/live` | Live NVLink + IB / RoCE TX/RX rates |
 | `GET` | `/api/heatmap?metric=utilization&hours=6` | Historical heatmap data |
 | `GET` | `/api/timeline` | AI workload timeline events |
-| `GET` | `/api/tokens/stats?hours=24` | Token usage statistics |
+| `GET` | `/api/tokens/stats?hours=24` | Reset-safe token usage, rates, latency, and per-model statistics |
+| `GET` | `/api/llm/status` | Live vLLM queue, cache, preemption, and throughput metrics |
 | `POST` | `/api/ollama/discover` | Discover Ollama on a host |
 | `POST` | `/api/sglang/discover` | Discover SGLang Runtime on a host |
 | `POST` | `/api/vllm/discover` | Discover vLLM on a host |
@@ -299,7 +302,8 @@ See [`.env.example`](.env.example) for the full list.
 | `GET/PUT` | `/api/settings` | Runtime configuration |
 | `GET` | `/api/gpu/processes` | Enriched GPU process list (PID, name, user, uptime, CPU%, model) |
 | `GET` | `/api/benchmarks/presets` | Benchmark prompt presets |
-| `POST` | `/api/benchmarks/run` | Run a benchmark against Ollama, SGLang, or vLLM |
+| `POST` | `/api/benchmarks/run` | Run a streaming benchmark against Ollama, SGLang, or vLLM |
+| `POST` | `/api/benchmarks/load` | Run a server-side concurrent weighted workload benchmark |
 | `GET` | `/api/benchmarks/results` | Benchmark result history |
 | `GET/PUT` | `/api/alerts/webhook` | Webhook configuration |
 | `POST` | `/api/alerts/webhook/test` | Send test webhook notification |

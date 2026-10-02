@@ -95,11 +95,12 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$",
   const dailyCost = hourlyCost * 24;
 
   const totalModels = hostsData.reduce(
-    (s, h) => s + (h.ollama?.models.length || 0) + (h.sglang?.models.length || 0),
+    (s, h) => s + (h.ollama?.models.length || 0) + (h.sglang?.models.length || 0) + (h.vllm?.models.length || 0),
     0
   );
   const hostsWithOllama = hostsData.filter((h) => h.ollama?.isAvailable).length;
   const hostsWithSglang = hostsData.filter((h) => h.sglang?.isAvailable).length;
+  const hostsWithVllm = hostsData.filter((h) => h.vllm?.isAvailable).length;
 
   // Fleet-wide token stats
   const hostUrls = hostsData.map((h) => h.url);
@@ -243,10 +244,11 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$",
             color: "text-purple-500",
             bg: "bg-purple-500/10",
             sub:
-              hostsWithOllama > 0 || hostsWithSglang > 0
+              hostsWithOllama > 0 || hostsWithSglang > 0 || hostsWithVllm > 0
                 ? [
                     hostsWithOllama > 0 ? `${hostsWithOllama} Ollama` : "",
                     hostsWithSglang > 0 ? `${hostsWithSglang} SGLang` : "",
+                    hostsWithVllm > 0 ? `${hostsWithVllm} vLLM` : "",
                   ].filter(Boolean).join(" + ")
                 : undefined,
           },

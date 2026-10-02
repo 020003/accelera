@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
+import { apiFetch } from "@/lib/api";
 import { proxyUrl } from "@/lib/proxy";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -26,13 +27,13 @@ interface Host {
 }
 
 interface HostAiInfo {
-  ollama?: { isAvailable: boolean; models: any[] };
-  sglang?: { isAvailable: boolean; models: any[] };
+  ollama?: { isAvailable: boolean; models: unknown[] };
+  sglang?: { isAvailable: boolean; models: unknown[] };
 }
 
 interface HostManagerProps {
   hosts: Host[];
-  setHosts: (hosts: Host[]) => void;
+  setHosts: Dispatch<SetStateAction<Host[]>>;
   onHostStatusChange: (url: string, isConnected: boolean) => void;
   hostsAiInfo?: Record<string, HostAiInfo>;
 }
@@ -50,7 +51,7 @@ export function HostManager({ hosts, setHosts, onHostStatusChange, hostsAiInfo }
 
   const persistOrder = async (orderedUrls: string[]) => {
     try {
-      const res = await fetch("/api/hosts/order", {
+      const res = await apiFetch("/api/hosts/order", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -108,7 +109,7 @@ export function HostManager({ hosts, setHosts, onHostStatusChange, hostsAiInfo }
     }
     setSavingName(true);
     try {
-      const res = await fetch(`/api/hosts/${encodeURIComponent(url)}`, {
+      const res = await apiFetch(`/api/hosts/${encodeURIComponent(url)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -153,7 +154,7 @@ export function HostManager({ hosts, setHosts, onHostStatusChange, hostsAiInfo }
     setIsAdding(true);
 
     try {
-      const response = await fetch("/api/hosts", {
+      const response = await apiFetch("/api/hosts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -187,7 +188,7 @@ export function HostManager({ hosts, setHosts, onHostStatusChange, hostsAiInfo }
 
     try {
       const encodedUrl = encodeURIComponent(url);
-      const response = await fetch(`/api/hosts/${encodedUrl}`, {
+      const response = await apiFetch(`/api/hosts/${encodedUrl}`, {
         method: "DELETE",
         credentials: "include",
       });

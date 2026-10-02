@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -34,12 +35,21 @@ def _install_stubs():
     config.VLLM_URL = ""
     config.VLLM_DISCOVER_TIMEOUT = 3000
     config.VLLM_DEFAULT_PORT = 8000
+    config.OLLAMA_URL = ""
+    config.OLLAMA_METRICS_URL = ""
+    config.SGLANG_URL = ""
+    config.SGLANG_DEFAULT_PORT = 30000
     sys.modules["config"] = config
 
     utils = types.ModuleType("utils")
     utils.run_cmd = lambda *args, **kwargs: ""
     utils.is_valid_host_url = lambda url: True
     sys.modules["utils"] = utils
+
+    storage = types.ModuleType("storage")
+    storage.record_token_snapshot = lambda **kwargs: None
+    storage.get_token_stats = lambda hours: {}
+    sys.modules["storage"] = storage
 
     blueprints = types.ModuleType("blueprints")
     blueprints.__path__ = []
@@ -118,6 +128,78 @@ class VllmAttributionTests(unittest.TestCase):
         self.assertEqual(result["statistics"], {"totalModels": 2, "totalInstances": 2})
         self.assertEqual([m["id"] for m in result["models"]], ["qwen3.6-27b-fp8", "qwen3.6-35b-a3b-mtp"])
         self.assertEqual(result["instances"][0]["primaryModel"]["id"], "qwen3.6-27b-fp8")
+
+    def test_vllm_metrics_preserve_model_labels_and_prefer_success_count(self):
+        tokens = _load_module("tokens_under_test", "blueprints/tokens.py")
+        text = """
+vllm:generation_tokens_total{model_name="model-a"} 100
+vllm:prompt_tokens_total{model_name="model-a"} 40
+vllm:request_success_total{model_name="model-a",finished_reason="stop"} 5
+vllm:request_success_total{model_name="model-a",finished_reason="length"} 2
+vllm:num_requests_total{model_name="model-a"} 99
+vllm:inter_token_latency_seconds_sum{model_name="model-a"} 2.5
+vllm:inter_token_latency_seconds_count{model_name="model-a"} 50
+vllm_generation_tokens_total{model_name="model-b"} 30
+vllm_prompt_tokens_total{model_name="model-b"} 10
+"""
+
+        groups = tokens._vllm_metric_groups(text)
+        aggregate = tokens._parse_vllm_metrics(text)
+
+        self.assertEqual(set(groups), {"model-a", "model-b"})
+        self.assertEqual(groups["model-b"]["generated_tokens"], 30)
+        self.assertEqual(aggregate["generated_tokens"], 130)
+        self.assertEqual(aggregate["request_count"], 7)
+        self.assertEqual(aggregate["tpt_count"], 50)
+
+    def test_token_stats_include_window_baseline_and_counter_resets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = types.ModuleType("config")
+            config.DATA_DIR = directory
+            config.HISTORICAL_DATA_RETENTION = 168
+            sys.modules["config"] = config
+            spec = importlib.util.spec_from_file_location("storage_under_test", ROOT / "storage.py")
+            storage = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(storage)
+            storage.init_db()
+            snapshots = [
+                (6300, 40, 100, 4),
+                (6500, 50, 130, 5),
+                (7000, 2, 5, 1),
+                (7100, 6, 15, 2),
+            ]
+            for timestamp, prompt, generated, requests in snapshots:
+                storage.time.time = lambda value=timestamp: value
+                storage.record_token_snapshot("model", prompt, generated, requests, 0, 0, requests)
+            storage.time.time = lambda: 10000
+
+            stats = storage.get_token_stats(1)
+
+            self.assertEqual(stats["summary"]["total_generated"], 45)
+            self.assertEqual(stats["summary"]["total_prompt"], 16)
+            self.assertEqual(stats["summary"]["cumulative_generated"], 145)
+            self.assertEqual(stats["summary"]["cumulative_prompt"], 56)
+            self.assertEqual(stats["summary"]["total_requests"], 3)
+            self.assertEqual(stats["models"]["model"]["avg_generated_tokens"], 15)
+            storage._close_db()
+
+    def test_vllm_status_exposes_scheduler_cache_and_prefix_metrics(self):
+        tokens = _load_module("tokens_status_under_test", "blueprints/tokens.py")
+        status = tokens._parse_vllm_status("""
+vllm:num_requests_running{model_name="a"} 3
+vllm:num_requests_waiting{model_name="a"} 4
+vllm:num_requests_swapped{model_name="a"} 1
+vllm:kv_cache_usage_perc{model_name="a"} 0.875
+vllm:cpu_cache_usage_perc{model_name="a"} 0.25
+vllm:prefix_cache_queries_total{model_name="a"} 200
+vllm:prefix_cache_hits_total{model_name="a"} 150
+vllm:num_preemptions_total{model_name="a"} 6
+""")
+
+        self.assertEqual(status["scheduler"], {"running": 3, "waiting": 4, "swapped": 1})
+        self.assertEqual(status["cache"]["gpu_usage_pct"], 87.5)
+        self.assertEqual(status["prefix_cache"]["hit_rate_pct"], 75.0)
+        self.assertEqual(status["preemptions"], 6)
 
 
 if __name__ == "__main__":

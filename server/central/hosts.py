@@ -1,22 +1,14 @@
 """Host management blueprint — CRUD for monitored GPU servers."""
 
 from datetime import datetime, timezone
-from urllib.parse import urlparse
 
 from flask import Blueprint, jsonify, request
 
 import storage
 from auth import login_required
+from host_policy import validate_exporter_url
 
 hosts_bp = Blueprint("hosts", __name__)
-
-
-def _is_valid_host_url(url: str) -> bool:
-    try:
-        p = urlparse(url)
-        return p.scheme in ("http", "https") and bool(p.hostname)
-    except Exception:
-        return False
 
 
 def _restore_url(url: str) -> str:
@@ -47,11 +39,14 @@ def add_host():
     if not data or "url" not in data or "name" not in data:
         return jsonify({"error": "Missing url or name"}), 400
 
-    url = data["url"].strip()
     name = data["name"].strip()
+    try:
+        url = validate_exporter_url(data["url"], require_snapshot_path=True).value
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
-    if not _is_valid_host_url(url):
-        return jsonify({"error": "Invalid URL"}), 400
+    if not name or len(name) > 80:
+        return jsonify({"error": "Name must be 1–80 characters"}), 400
 
     existing = storage.load_hosts()
     for h in existing:

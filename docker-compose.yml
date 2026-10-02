@@ -1,4 +1,3 @@
-version: "3.8"
 services:
   frontend:
     build:
@@ -30,6 +29,7 @@ services:
       - SESSION_LIFETIME_HOURS=${SESSION_LIFETIME_HOURS:-24}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - EXPORTER_AUTH_TOKEN=${EXPORTER_AUTH_TOKEN:-}
+      - ALLOWED_EXPORTER_HOSTS=${ALLOWED_EXPORTER_HOSTS:-}
     volumes:
       - central-data:/app/data
     healthcheck:

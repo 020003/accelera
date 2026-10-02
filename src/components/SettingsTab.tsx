@@ -12,6 +12,7 @@ import { Timer, DollarSign, Lock, Cpu, LogOut, Eye, EyeOff, Activity, Settings a
 import { ApiTokensManager } from "@/components/ApiTokensManager";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
+import { apiFetch } from "@/lib/api";
 import { CURRENCIES } from "@/hooks/useCurrency";
 import type { Host, HostData } from "@/types/dashboard";
 
@@ -301,7 +302,7 @@ function DashboardAccessCard() {
     }
     setSaving(true);
     try {
-      const res = await fetch("/api/auth/password", {
+      const res = await apiFetch("/api/auth/password", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         credentials: "include",

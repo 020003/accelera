@@ -59,17 +59,6 @@ interface MixedPrompt {
   max_tokens: number;
 }
 
-interface MixedLoadResult {
-  ok: boolean;
-  statusCode: number | null;
-  latencyMs: number;
-  workload: string;
-  tokensPerSecond: number;
-  generatedTokens: number;
-  timeToFirstTokenMs: number | null;
-  error?: string;
-}
-
 interface MixedLoadSummary {
   requests: number;
   successful: number;
@@ -84,12 +73,15 @@ interface MixedLoadSummary {
     p99: number;
     max: number;
   };
-  tokensPerSecond: {
+  outputTokensPerSecond: number;
+  totalTokensPerSecond: number;
+  generatedTokens: number;
+  ttftMs: {
     mean: number;
-    p50: number;
+    p95: number;
   };
-  byWorkload: Record<string, { count: number; ok: number; errors: number }>;
-  errors: { statusCode: number | null; workload: string; error?: string }[];
+  byWorkload: Record<string, { count: number; successful: number; failed: number }>;
+  errors: { workload: string; error?: string }[];
 }
 
 interface RuntimeModel {
@@ -186,18 +178,6 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function percentile(values: number[], pct: number): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const index = Math.min(sorted.length - 1, Math.max(0, Math.round((pct / 100) * (sorted.length - 1))));
-  return sorted[index];
-}
-
-function mean(values: number[]): number {
-  if (values.length === 0) return 0;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
 function parseMixedPrompts(value: string): MixedPrompt[] {
   const prompts = value
     .split("\n")
@@ -218,57 +198,6 @@ function parseMixedPrompts(value: string): MixedPrompt[] {
   return prompts;
 }
 
-function pickWeightedPrompt(prompts: MixedPrompt[]): MixedPrompt {
-  const totalWeight = prompts.reduce((sum, prompt) => sum + prompt.weight, 0);
-  let cursor = Math.random() * totalWeight;
-  for (const prompt of prompts) {
-    cursor -= prompt.weight;
-    if (cursor <= 0) return prompt;
-  }
-  return prompts[prompts.length - 1];
-}
-
-function summarizeMixedLoad(results: MixedLoadResult[], elapsedMs: number): MixedLoadSummary {
-  const latencies = results.map((result) => result.latencyMs);
-  const successful = results.filter((result) => result.ok);
-  const tps = successful.map((result) => result.tokensPerSecond).filter((value) => value > 0);
-  const byWorkload = results.reduce<MixedLoadSummary["byWorkload"]>((acc, result) => {
-    const current = acc[result.workload] ?? { count: 0, ok: 0, errors: 0 };
-    return {
-      ...acc,
-      [result.workload]: {
-        count: current.count + 1,
-        ok: current.ok + (result.ok ? 1 : 0),
-        errors: current.errors + (result.ok ? 0 : 1),
-      },
-    };
-  }, {});
-  return {
-    requests: results.length,
-    successful: successful.length,
-    failed: results.length - successful.length,
-    elapsedMs,
-    requestsPerSecond: elapsedMs > 0 ? results.length / (elapsedMs / 1000) : 0,
-    latencyMs: {
-      min: latencies.length ? Math.min(...latencies) : 0,
-      mean: mean(latencies),
-      p50: percentile(latencies, 50),
-      p95: percentile(latencies, 95),
-      p99: percentile(latencies, 99),
-      max: latencies.length ? Math.max(...latencies) : 0,
-    },
-    tokensPerSecond: {
-      mean: mean(tps),
-      p50: percentile(tps, 50),
-    },
-    byWorkload,
-    errors: results
-      .filter((result) => !result.ok)
-      .slice(0, 5)
-      .map((result) => ({ statusCode: result.statusCode, workload: result.workload, error: result.error })),
-  };
-}
-
 export function BenchmarkRunner({ hostUrl, ollama, sglang, vllm }: BenchmarkRunnerProps) {
   const cached = _stateCache.get(hostUrl);
   const [presets, setPresets] = useState<Record<string, Preset>>({});
@@ -285,7 +214,6 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang, vllm }: BenchmarkRunn
   const [loadMaxTokens, setLoadMaxTokens] = useState(256);
   const [loadPromptText, setLoadPromptText] = useState(DEFAULT_MIXED_PROMPT_TEXT);
   const [loadRunning, setLoadRunning] = useState(false);
-  const [loadCompleted, setLoadCompleted] = useState(0);
   const [loadSummary, setLoadSummary] = useState<MixedLoadSummary | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -435,7 +363,6 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang, vllm }: BenchmarkRunn
 
   const runMixedLoad = async () => {
     setLoadRunning(true);
-    setLoadCompleted(0);
     setLoadSummary(null);
     setLoadError(null);
     const base = getBaseUrl();
@@ -443,60 +370,52 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang, vllm }: BenchmarkRunn
     const requestCount = clampNumber(loadRequests, 4, 500);
     const concurrency = clampNumber(loadConcurrency, 1, 64);
     const maxTokens = clampNumber(loadMaxTokens, 16, 512);
-    const startedAt = performance.now();
     try {
       const prompts = parseMixedPrompts(loadPromptText);
-      const queue = Array.from({ length: requestCount }, () => pickWeightedPrompt(prompts));
-      const results: MixedLoadResult[] = [];
-      let cursor = 0;
-      const runOne = async (prompt: MixedPrompt): Promise<MixedLoadResult> => {
-        const started = performance.now();
-        try {
-          const response = await fetch(proxyUrl(`${base}/api/benchmarks/run`), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              model: modelName,
-              runtime: selectedRuntime,
-              prompt: prompt.prompt,
-              max_tokens: Math.min(maxTokens, prompt.max_tokens),
-            }),
-          });
-          const data = await response.json() as Partial<BenchmarkResult> & { error?: string };
-          return {
-            ok: response.ok && data.status === "completed",
-            statusCode: response.status,
-            latencyMs: performance.now() - started,
-            workload: prompt.name,
-            tokensPerSecond: data.tokens_per_second ?? 0,
-            generatedTokens: data.generated_tokens ?? 0,
-            timeToFirstTokenMs: data.time_to_first_token_ms ?? null,
-            error: data.error,
-          };
-        } catch (error) {
-          return {
-            ok: false,
-            statusCode: null,
-            latencyMs: performance.now() - started,
-            workload: prompt.name,
-            tokensPerSecond: 0,
-            generatedTokens: 0,
-            timeToFirstTokenMs: null,
-            error: error instanceof Error ? error.message : "Network error",
-          };
-        }
+      const response = await fetch(proxyUrl(`${base}/api/benchmarks/load`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: modelName,
+          runtime: selectedRuntime,
+          requests: requestCount,
+          concurrency,
+          max_tokens: maxTokens,
+          workloads: prompts,
+        }),
+      });
+      const data = await response.json() as {
+        error?: string;
+        summary?: {
+          requests: number;
+          successful: number;
+          failed: number;
+          elapsed_ms: number;
+          requests_per_second: number;
+          output_tokens_per_second: number;
+          total_tokens_per_second: number;
+          generated_tokens: number;
+          latency_ms: MixedLoadSummary["latencyMs"];
+          ttft_ms: MixedLoadSummary["ttftMs"];
+          by_workload: MixedLoadSummary["byWorkload"];
+          errors: MixedLoadSummary["errors"];
+        };
       };
-      const worker = async () => {
-        while (cursor < queue.length) {
-          const next = queue[cursor];
-          cursor += 1;
-          const result = await runOne(next);
-          results.push(result);
-          setLoadCompleted((value) => value + 1);
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, () => worker()));
-      setLoadSummary(summarizeMixedLoad(results, performance.now() - startedAt));
+      if (!response.ok || !data.summary) throw new Error(data.error || `HTTP ${response.status}`);
+      setLoadSummary({
+        requests: data.summary.requests,
+        successful: data.summary.successful,
+        failed: data.summary.failed,
+        elapsedMs: data.summary.elapsed_ms,
+        requestsPerSecond: data.summary.requests_per_second,
+        outputTokensPerSecond: data.summary.output_tokens_per_second,
+        totalTokensPerSecond: data.summary.total_tokens_per_second,
+        generatedTokens: data.summary.generated_tokens,
+        latencyMs: data.summary.latency_ms,
+        ttftMs: data.summary.ttft_ms,
+        byWorkload: data.summary.by_workload,
+        errors: data.summary.errors,
+      });
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Invalid mixed-load configuration");
     } finally {
@@ -755,7 +674,7 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang, vllm }: BenchmarkRunn
               size="sm"
             >
               {loadRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-              {loadRunning ? `Running ${loadCompleted}/${loadRequests}` : "Run Mixed Load"}
+              {loadRunning ? "Running server-side…" : "Run Mixed Load"}
             </Button>
             <Badge variant="outline" className="text-[10px]">
               {selectedRuntime} · {selectedModel.replace(/^(ollama|sglang|vllm):/, "")}
@@ -781,12 +700,15 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang, vllm }: BenchmarkRunn
                 <Badge variant="outline" className="text-[10px]">
                   elapsed {formatDuration(loadSummary.elapsedMs)}
                 </Badge>
+                <Badge variant="outline" className="text-[10px]">
+                  {loadSummary.generatedTokens.toLocaleString()} output tokens
+                </Badge>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <MetricCard icon={Timer} label="Mean latency" value={formatDuration(loadSummary.latencyMs.mean)} color="text-blue-500" />
-                <MetricCard icon={Clock} label="P95 latency" value={formatDuration(loadSummary.latencyMs.p95)} color="text-amber-500" />
-                <MetricCard icon={TrendingUp} label="Mean tok/s" value={loadSummary.tokensPerSecond.mean.toFixed(1)} color="text-emerald-500" />
-                <MetricCard icon={Hash} label="P50 tok/s" value={loadSummary.tokensPerSecond.p50.toFixed(1)} color="text-purple-500" />
+                <MetricCard icon={Clock} label="P95 TTFT" value={formatDuration(loadSummary.ttftMs.p95)} color="text-amber-500" />
+                <MetricCard icon={TrendingUp} label="Output tok/s" value={loadSummary.outputTokensPerSecond.toFixed(1)} color="text-emerald-500" />
+                <MetricCard icon={Hash} label="Total tok/s" value={loadSummary.totalTokensPerSecond.toFixed(1)} color="text-purple-500" />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                 <div className="rounded-md bg-muted/50 p-3 space-y-1">
@@ -794,7 +716,7 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang, vllm }: BenchmarkRunn
                   {Object.entries(loadSummary.byWorkload).map(([name, stats]) => (
                     <div key={name} className="flex items-center justify-between gap-2 font-mono">
                       <span>{name}</span>
-                      <span>{stats.ok}/{stats.count} ok</span>
+                      <span>{stats.successful}/{stats.count} ok</span>
                     </div>
                   ))}
                 </div>
@@ -810,7 +732,7 @@ export function BenchmarkRunner({ hostUrl, ollama, sglang, vllm }: BenchmarkRunn
                   <div className="font-medium text-red-500">Sample errors</div>
                   {loadSummary.errors.map((error, index) => (
                     <div key={`${error.workload}-${index}`} className="text-muted-foreground">
-                      {error.statusCode ?? "network"} · {error.workload} · {error.error || "unknown error"}
+                      {error.workload} · {error.error || "unknown error"}
                     </div>
                   ))}
                 </div>

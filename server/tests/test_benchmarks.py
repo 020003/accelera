@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import pathlib
 import sys
 import types
@@ -21,6 +22,10 @@ class _Response:
 
     def json(self):
         return self._payload
+
+    def iter_lines(self):
+        yield f"data: {json.dumps(self._payload)}".encode()
+        yield b"data: [DONE]"
 
 
 class BenchmarkBlueprintTests(unittest.TestCase):
@@ -71,6 +76,10 @@ class BenchmarkBlueprintTests(unittest.TestCase):
         self.assertEqual(result["generated_tokens"], 5)
         self.assertEqual(result["metadata"]["endpoint"], "completions")
         self.assertEqual(result["metadata"]["response_preview"], "hello")
+        self.assertEqual(result["metadata"]["token_count_source"], "runtime_usage")
+        self.assertIsNotNone(result["time_to_first_token_ms"])
+        self.assertTrue(calls[0][1]["stream"])
+        self.assertEqual(calls[0][1]["stream_options"], {"include_usage": True})
 
     def test_openai_compat_falls_back_to_chat_completions_on_404(self):
         benchmarks = self._load_benchmarks()
@@ -95,6 +104,39 @@ class BenchmarkBlueprintTests(unittest.TestCase):
         self.assertEqual(result["generated_tokens"], 6)
         self.assertEqual(result["metadata"]["endpoint"], "chat/completions")
         self.assertEqual(result["metadata"]["response_preview"], "chat hello")
+        self.assertIsNotNone(result["time_to_first_token_ms"])
+
+    def test_load_summary_reports_aggregate_throughput_and_ttft(self):
+        benchmarks = self._load_benchmarks()
+        results = [
+            {
+                "status": "completed",
+                "prompt_tokens": 10,
+                "generated_tokens": 20,
+                "tokens_per_second": 40,
+                "time_to_first_token_ms": 25,
+                "total_duration_ms": 500,
+                "workload": "chat",
+            },
+            {
+                "status": "error",
+                "prompt_tokens": 0,
+                "generated_tokens": 0,
+                "tokens_per_second": 0,
+                "time_to_first_token_ms": None,
+                "total_duration_ms": 1000,
+                "workload": "code",
+                "error": "timeout",
+            },
+        ]
+
+        summary = benchmarks._summarize_load(results, 2000)
+
+        self.assertEqual(summary["successful"], 1)
+        self.assertEqual(summary["output_tokens_per_second"], 10)
+        self.assertEqual(summary["total_tokens_per_second"], 15)
+        self.assertEqual(summary["ttft_ms"]["p95"], 25)
+        self.assertEqual(summary["by_workload"]["code"]["failed"], 1)
 
 
 if __name__ == "__main__":

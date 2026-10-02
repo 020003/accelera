@@ -1,6 +1,8 @@
 """Central backend middleware: rate limiting and login lockout."""
 
-from flask import Flask, jsonify, request
+import secrets
+
+from flask import Flask, jsonify, request, session
 
 import storage
 
@@ -42,7 +44,28 @@ def is_login_locked(ip: str) -> tuple[bool, int]:
 # Registration
 # ---------------------------------------------------------------------------
 
+def get_csrf_token() -> str:
+    """Return the session-bound CSRF token, creating it on first use."""
+    token = session.get("csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["csrf_token"] = token
+    return token
+
+
 def register_middleware(app: Flask) -> None:
+    @app.before_request
+    def _check_csrf():
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return None
+        if request.path in ("/health", "/api/auth/setup", "/api/auth/login") or request.path.startswith("/api/v1/"):
+            return None
+        if not session.get("user"):
+            return None
+        supplied = request.headers.get("X-CSRF-Token", "")
+        if not secrets.compare_digest(supplied, get_csrf_token()):
+            return jsonify({"error": "CSRF token required"}), 403
+
     @app.before_request
     def _check_rate_limit():
         if request.path in ("/health",):

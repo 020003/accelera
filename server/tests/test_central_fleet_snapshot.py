@@ -46,6 +46,12 @@ def _load_fleet(storage_module):
     auth.login_required = lambda fn: fn
     sys.modules["auth"] = auth
     sys.modules["storage"] = storage_module
+    host_policy = types.ModuleType("host_policy")
+    host_policy.validate_exporter_url = lambda url, **kwargs: types.SimpleNamespace(
+        value=url,
+        base_url=url.removesuffix("/nvidia-smi.json"),
+    )
+    sys.modules["host_policy"] = host_policy
     spec = importlib.util.spec_from_file_location("central_fleet_under_test", CENTRAL / "fleet.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules["central_fleet_under_test"] = module
@@ -207,6 +213,28 @@ class CentralFleetSnapshotTests(unittest.TestCase):
             self.assertEqual(second["gpus"], [{"minor_number": 0, "utilization": 2}])
             self.assertEqual(second["snapshotSource"], "live")
             self.assertEqual(second["vllm"]["models"], [{"id": "model-a"}])
+
+    def test_fabric_snapshot_caches_and_preserves_host_identity(self):
+        with tempfile.TemporaryDirectory() as data_dir:
+            storage = _load_storage(data_dir)
+            storage.init_db()
+            fleet = _load_fleet(storage)
+            host = {"url": "http://gpu:5000/nvidia-smi.json", "name": "GPU Host"}
+            calls = {"get": 0}
+
+            def fake_get(url, **kwargs):
+                calls["get"] += 1
+                self.assertTrue(url.endswith("/api/fabric/live"))
+                return _Response(200, {"infiniband": [{"device": "mlx5_0"}], "nvlink": []})
+
+            with patch.object(fleet.requests, "get", fake_get):
+                first = fleet._fabric_snapshot(host)
+                second = fleet._fabric_snapshot(host)
+
+            self.assertEqual(calls["get"], 1)
+            self.assertTrue(first["isConnected"])
+            self.assertEqual(first["name"], "GPU Host")
+            self.assertEqual(second["infiniband"], [{"device": "mlx5_0"}])
 
     def test_request_headers_include_exporter_token_when_configured(self):
         with tempfile.TemporaryDirectory() as data_dir:

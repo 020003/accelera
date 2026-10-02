@@ -233,7 +233,7 @@ export default function AdvancedVisualizations() {
             ) : topologyError ? (
               <ErrorPlaceholder text="Failed to load topology data. Check host connectivity." />
             ) : (
-              <GPUTopologyMap data={topologyData} />
+              <GPUTopologyMap data={topologyData} hosts={hosts} />
             )}
           </TabsContent>
 

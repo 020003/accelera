@@ -15,6 +15,7 @@ import bcrypt
 from flask import Blueprint, jsonify, request, session
 
 import storage
+from middleware import get_csrf_token
 
 log = logging.getLogger(__name__)
 
@@ -71,12 +72,13 @@ def setup():
     if not storage.create_user(username, pw_hash, role="admin"):
         return jsonify({"error": "Failed to create user"}), 500
 
+    session.clear()
     session["user"] = username
     session["role"] = "admin"
     session.permanent = True
 
     log.info("Initial admin account created: %s", username)
-    return jsonify({"message": "Admin account created", "username": username}), 201
+    return jsonify({"message": "Admin account created", "username": username, "csrfToken": get_csrf_token()}), 201
 
 
 @auth_bp.route("/api/auth/login", methods=["POST"])
@@ -103,6 +105,7 @@ def login():
     from middleware import clear_login_failures
     clear_login_failures(ip)
 
+    session.clear()
     session["user"] = user["username"]
     session["role"] = user["role"]
     session.permanent = True
@@ -111,6 +114,7 @@ def login():
         "message": "Logged in",
         "username": user["username"],
         "role": user["role"],
+        "csrfToken": get_csrf_token(),
     })
 
 
@@ -132,6 +136,7 @@ def status():
         "username": user,
         "role": session.get("role"),
         "needsSetup": needs_setup,
+        "csrfToken": get_csrf_token() if user else None,
     })
 
 

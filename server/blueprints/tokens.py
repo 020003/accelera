@@ -1,6 +1,6 @@
-"""Token usage statistics – scrapes Ollama & SGLang Prometheus metrics.
+"""Token usage statistics – scrapes Ollama, SGLang, and vLLM metrics.
 
-Periodically reads ``/metrics`` from Ollama and SGLang instances,
+Periodically reads ``/metrics`` from Ollama, SGLang, and vLLM instances,
 storing cumulative counter snapshots in SQLite.  The API endpoint
 returns delta-based stats for a configurable window.
 
@@ -27,6 +27,7 @@ Endpoints:
 import logging
 import os
 import re
+import time
 
 import requests as http_requests
 from flask import Blueprint, jsonify, request
@@ -78,6 +79,24 @@ def _resolve_vllm_base_url() -> str:
 _ollama_metrics_url = _resolve_ollama_metrics_url()
 _sglang_base_url = _resolve_sglang_base_url()
 _vllm_base_url = _resolve_vllm_base_url()
+_vllm_urls_cache: tuple[float, list[str]] = (0.0, [])
+
+
+def _vllm_base_urls() -> list[str]:
+    global _vllm_urls_cache
+    now = time.monotonic()
+    cached_at, cached_urls = _vllm_urls_cache
+    if cached_urls and now - cached_at < 30:
+        return cached_urls
+    try:
+        from blueprints.vllm import check_vllm_availability
+        result = check_vllm_availability("http://localhost:5000")
+        urls = result.get("vllmUrls") or ([result["vllmUrl"]] if result.get("vllmUrl") else [])
+    except Exception:
+        urls = []
+    resolved = list(dict.fromkeys(url.rstrip("/") for url in urls if url)) or [_vllm_base_url]
+    _vllm_urls_cache = (now, resolved)
+    return resolved
 
 # ---------------------------------------------------------------------------
 # Ollama metrics
@@ -395,6 +414,48 @@ _RE_VLLM_PROMPT_ALT = re.compile(
 _RE_VLLM_REQUESTS_ALT = re.compile(
     r'^vllm_(?:num_requests_total|request_success_total)(?:\{[^}]*\})?\s+([\d.eE+\-]+)', re.M
 )
+_RE_PROM_SAMPLE = re.compile(
+    r'^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+([\d.eE+\-]+)(?:\s+\d+)?$', re.M
+)
+_RE_PROM_LABEL = re.compile(r'(\w+)="((?:\\.|[^"\\])*)"')
+
+
+def _prometheus_samples(text: str) -> list[tuple[str, dict[str, str], float]]:
+    samples = []
+    for match in _RE_PROM_SAMPLE.finditer(text):
+        try:
+            value = float(match.group(3))
+        except ValueError:
+            continue
+        labels = {
+            key: raw.replace(r"\n", "\n").replace(r'\"', '"').replace(r"\\", "\\")
+            for key, raw in _RE_PROM_LABEL.findall(match.group(2) or "")
+        }
+        samples.append((match.group(1).replace("_", ":", 1) if match.group(1).startswith("vllm_") else match.group(1), labels, value))
+    return samples
+
+
+def _vllm_metric_groups(text: str) -> dict[str, dict[str, float]]:
+    groups: dict[str, dict[str, float]] = {}
+    metric_keys = {
+        "vllm:generation_tokens_total": "generated_tokens",
+        "vllm:prompt_tokens_total": "prompt_tokens",
+        "vllm:num_requests_total": "request_count",
+        "vllm:request_success_total": "request_success_count",
+        "vllm:e2e_request_latency_seconds_sum": "request_duration_sum",
+        "vllm:inter_token_latency_seconds_sum": "itl_sum",
+        "vllm:inter_token_latency_seconds_count": "itl_count",
+        "vllm:time_to_first_token_seconds_sum": "ttft_sum",
+        "vllm:time_to_first_token_seconds_count": "ttft_count",
+    }
+    for name, labels, value in _prometheus_samples(text):
+        key = metric_keys.get(name)
+        if not key:
+            continue
+        model = labels.get("model_name") or labels.get("model") or "vllm-model"
+        values = groups.setdefault(model, {})
+        values[key] = values.get(key, 0.0) + value
+    return groups
 
 
 def _get_vllm_model_name() -> str:
@@ -412,79 +473,123 @@ def _get_vllm_model_name() -> str:
 
 
 def _parse_vllm_metrics(text: str) -> dict | None:
-    """Parse vLLM Prometheus metrics into a single model dict."""
-    gen = 0
-    prompt = 0
-    req_count = 0
-    dur_sum = 0.0
-    tpt_sum = 0.0
-    tpt_count = 0
-
-    for m in _RE_VLLM_GEN.finditer(text):
-        gen += int(float(m.group(1)))
-    if gen == 0:
-        for m in _RE_VLLM_GEN_ALT.finditer(text):
-            gen += int(float(m.group(1)))
-
-    for m in _RE_VLLM_PROMPT.finditer(text):
-        prompt += int(float(m.group(1)))
-    if prompt == 0:
-        for m in _RE_VLLM_PROMPT_ALT.finditer(text):
-            prompt += int(float(m.group(1)))
-
-    if gen == 0 and prompt == 0:
+    groups = _vllm_metric_groups(text)
+    if not groups:
         return None
-
-    for m in _RE_VLLM_REQUESTS.finditer(text):
-        req_count += int(float(m.group(1)))
-    if req_count == 0:
-        for m in _RE_VLLM_REQUESTS_ALT.finditer(text):
-            req_count += int(float(m.group(1)))
-
-    for m in _RE_VLLM_E2E_SUM.finditer(text):
-        dur_sum += float(m.group(1))
-
-    # Prefer inter-token latency (per-token), fall back to TTFT only if
-    # ITL is missing.  TTFT is per-request and would distort tok/sec.
-    for m in _RE_VLLM_ITL_SUM.finditer(text):
-        tpt_sum += float(m.group(1))
-    for m in _RE_VLLM_ITL_COUNT.finditer(text):
-        tpt_count += int(float(m.group(1)))
-    if tpt_count == 0:
-        for m in _RE_VLLM_TTFT_SUM.finditer(text):
-            tpt_sum += float(m.group(1))
-        for m in _RE_VLLM_TTFT_COUNT.finditer(text):
-            tpt_count += int(float(m.group(1)))
-
-    return {
-        "generated_tokens": gen,
-        "prompt_tokens": prompt,
-        "request_count": req_count,
-        "request_duration_sum": dur_sum,
-        "tpt_sum": tpt_sum,
-        "tpt_count": tpt_count,
+    result = {
+        "generated_tokens": 0,
+        "prompt_tokens": 0,
+        "request_count": 0,
+        "request_duration_sum": 0.0,
+        "tpt_sum": 0.0,
+        "tpt_count": 0,
     }
+    for values in groups.values():
+        result["generated_tokens"] += int(values.get("generated_tokens", 0))
+        result["prompt_tokens"] += int(values.get("prompt_tokens", 0))
+        result["request_count"] += int(values.get("request_success_count") or values.get("request_count", 0))
+        result["request_duration_sum"] += values.get("request_duration_sum", 0.0)
+        if values.get("itl_count", 0) > 0:
+            result["tpt_sum"] += values.get("itl_sum", 0.0)
+            result["tpt_count"] += int(values["itl_count"])
+        else:
+            result["tpt_sum"] += values.get("ttft_sum", 0.0)
+            result["tpt_count"] += int(values.get("ttft_count", 0))
+    return result
 
 
 def _collect_vllm():
-    """Scrape vLLM /metrics and record a snapshot."""
-    try:
-        resp = http_requests.get(f"{_vllm_base_url}/metrics", timeout=3)
-        if resp.status_code == 200:
-            data = _parse_vllm_metrics(resp.text)
-            if data is not None:
-                model_name = f"[vllm] {_get_vllm_model_name()}"
+    urls = _vllm_base_urls()
+    for base_url in urls:
+        try:
+            resp = http_requests.get(f"{base_url}/metrics", timeout=3)
+            if resp.status_code != 200:
+                continue
+            groups = _vllm_metric_groups(resp.text)
+            fallback_model = _get_vllm_model_name() if len(groups) == 1 and len(urls) == 1 else "vllm-model"
+            instance = urlparse(base_url).port or VLLM_DEFAULT_PORT
+            prefix = f"[vllm@{instance}]" if len(urls) > 1 else "[vllm]"
+            for model, values in groups.items():
+                if not values.get("generated_tokens") and not values.get("prompt_tokens"):
+                    continue
+                use_itl = values.get("itl_count", 0) > 0
                 storage.record_token_snapshot(
-                    model=model_name,
-                    prompt_tokens=data["prompt_tokens"],
-                    generated_tokens=data["generated_tokens"],
-                    request_count=data["request_count"],
-                    tpt_sum=data["tpt_sum"],
-                    tpt_count=data["tpt_count"],
-                    req_dur_sum=data["request_duration_sum"],
+                    model=f"{prefix} {fallback_model if model == 'vllm-model' else model}",
+                    prompt_tokens=int(values.get("prompt_tokens", 0)),
+                    generated_tokens=int(values.get("generated_tokens", 0)),
+                    request_count=int(values.get("request_success_count") or values.get("request_count", 0)),
+                    tpt_sum=values.get("itl_sum" if use_itl else "ttft_sum", 0.0),
+                    tpt_count=int(values.get("itl_count" if use_itl else "ttft_count", 0)),
+                    req_dur_sum=values.get("request_duration_sum", 0.0),
                 )
-    except Exception:
-        log.debug("vLLM /metrics collection failed", exc_info=True)
+        except Exception:
+            log.debug("vLLM /metrics collection failed for %s", base_url, exc_info=True)
+
+
+_vllm_live_previous: tuple[float, float, float] | None = None
+
+
+def _parse_vllm_status(text: str) -> dict:
+    totals: dict[str, float] = {}
+    values_by_name: dict[str, list[float]] = {}
+    for name, _labels, value in _prometheus_samples(text):
+        totals[name] = totals.get(name, 0.0) + value
+        values_by_name.setdefault(name, []).append(value)
+
+    def metric(*names: str) -> float:
+        return next((totals[name] for name in names if name in totals), 0.0)
+
+    def max_metric(*names: str) -> float:
+        values = next((values_by_name[name] for name in names if name in values_by_name), [])
+        return max(values, default=0.0)
+
+    queries = metric("vllm:prefix_cache_queries_total", "vllm:prefix_cache_queries")
+    hits = metric("vllm:prefix_cache_hits_total", "vllm:prefix_cache_hits")
+    return {
+        "scheduler": {
+            "running": int(metric("vllm:num_requests_running")),
+            "waiting": int(metric("vllm:num_requests_waiting")),
+            "swapped": int(metric("vllm:num_requests_swapped")),
+        },
+        "cache": {
+            "gpu_usage_pct": round(max_metric("vllm:kv_cache_usage_perc", "vllm:gpu_cache_usage_perc") * 100, 1),
+            "cpu_usage_pct": round(max_metric("vllm:cpu_cache_usage_perc") * 100, 1),
+        },
+        "prefix_cache": {
+            "queries": int(queries),
+            "hits": int(hits),
+            "hit_rate_pct": round(hits / queries * 100, 1) if queries > 0 else 0.0,
+        },
+        "preemptions": int(metric("vllm:num_preemptions_total")),
+        "counters": {
+            "prompt_tokens": int(metric("vllm:prompt_tokens_total")),
+            "generated_tokens": int(metric("vllm:generation_tokens_total")),
+            "successful_requests": int(metric("vllm:request_success_total", "vllm:num_requests_total")),
+        },
+    }
+
+
+def _add_live_throughput(status: dict, collected_at: float) -> None:
+    global _vllm_live_previous
+    counters = status["counters"]
+    prompt = counters["prompt_tokens"]
+    generated = counters["generated_tokens"]
+    prompt_tps = 0.0
+    generation_tps = 0.0
+    if _vllm_live_previous is not None:
+        previous_at, previous_prompt, previous_generated = _vllm_live_previous
+        elapsed = collected_at - previous_at
+        if elapsed > 0:
+            prompt_delta = prompt - previous_prompt if prompt >= previous_prompt else prompt
+            generated_delta = generated - previous_generated if generated >= previous_generated else generated
+            prompt_tps = prompt_delta / elapsed
+            generation_tps = generated_delta / elapsed
+    _vllm_live_previous = (collected_at, prompt, generated)
+    status["throughput"] = {
+        "prompt_tokens_per_second": round(prompt_tps, 1),
+        "generation_tokens_per_second": round(generation_tps, 1),
+        "total_tokens_per_second": round(prompt_tps + generation_tps, 1),
+    }
 
 
 def collect_token_metrics():
@@ -492,6 +597,36 @@ def collect_token_metrics():
     _collect_ollama()
     _collect_sglang()
     _collect_vllm()
+
+
+@tokens_bp.route("/api/llm/status", methods=["GET"])
+def llm_status():
+    collected_at = time.time()
+    texts = []
+    instances = []
+    for base_url in _vllm_base_urls():
+        try:
+            resp = http_requests.get(f"{base_url}/metrics", timeout=3)
+            if resp.status_code != 200:
+                continue
+            instance_status = _parse_vllm_status(resp.text)
+            instance_status["endpoint"] = base_url
+            instances.append(instance_status)
+            texts.append(resp.text)
+        except Exception:
+            log.debug("vLLM live status collection failed for %s", base_url, exc_info=True)
+    if not texts:
+        return jsonify({"runtime": "vllm", "available": False, "error": "vLLM metrics are unavailable"}), 503
+    status = _parse_vllm_status("\n".join(texts))
+    _add_live_throughput(status, collected_at)
+    status.update({
+        "runtime": "vllm",
+        "available": True,
+        "endpoints": [instance["endpoint"] for instance in instances],
+        "instances": instances,
+        "collected_at": collected_at,
+    })
+    return jsonify(status)
 
 
 @tokens_bp.route("/api/tokens/stats", methods=["GET"])

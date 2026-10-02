@@ -8,13 +8,12 @@ import logging
 import os
 import threading
 import time
-from urllib.parse import urlparse
-
 import requests
 from flask import Blueprint, jsonify
 
 import storage
 from auth import login_required
+from host_policy import validate_exporter_url
 
 log = logging.getLogger(__name__)
 fleet_bp = Blueprint("fleet", __name__)
@@ -23,6 +22,7 @@ HTTP_TIMEOUT = 5.0
 FAN_OUT_WORKERS = 8
 CACHE_TTL_SECONDS = float(os.environ.get("FLEET_SNAPSHOT_CACHE_TTL_SECONDS", "0.5"))
 RUNTIME_CACHE_TTL_SECONDS = float(os.environ.get("FLEET_RUNTIME_CACHE_TTL_SECONDS", "300"))
+FABRIC_CACHE_TTL_SECONDS = float(os.environ.get("FLEET_FABRIC_CACHE_TTL_SECONDS", "2"))
 EXPORTER_AUTH_TOKEN = os.environ.get("EXPORTER_AUTH_TOKEN", "")
 STALE_ALERT_SECONDS = float(os.environ.get("FLEET_STALE_ALERT_SECONDS", "15"))
 OFFLINE_ALERT_SECONDS = float(os.environ.get("FLEET_OFFLINE_ALERT_SECONDS", "30"))
@@ -30,6 +30,7 @@ OFFLINE_ALERT_SECONDS = float(os.environ.get("FLEET_OFFLINE_ALERT_SECONDS", "30"
 _cache_lock = threading.Lock()
 _host_cache: dict[str, dict] = {}
 _runtime_cache: dict[str, dict] = {}
+_fabric_cache: dict[str, dict] = {}
 _host_status: dict[str, dict] = {}
 
 
@@ -46,10 +47,13 @@ def _request_headers() -> dict:
 
 def _safe_get_json(url: str) -> dict | None:
     try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return None
-        response = requests.get(url, timeout=HTTP_TIMEOUT, headers=_request_headers())
+        validated = validate_exporter_url(url)
+        response = requests.get(
+            validated.value,
+            timeout=HTTP_TIMEOUT,
+            headers=_request_headers(),
+            allow_redirects=False,
+        )
         if response.status_code != 200:
             return None
         return response.json()
@@ -60,14 +64,13 @@ def _safe_get_json(url: str) -> dict | None:
 
 def _safe_post_json(url: str, payload: dict) -> dict | None:
     try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return None
+        validated = validate_exporter_url(url)
         response = requests.post(
-            url,
+            validated.value,
             json=payload,
             timeout=HTTP_TIMEOUT,
             headers=_request_headers(),
+            allow_redirects=False,
         )
         if response.status_code != 200:
             return None
@@ -75,6 +78,33 @@ def _safe_post_json(url: str, payload: dict) -> dict | None:
     except Exception as exc:
         log.debug("fleet POST %s failed: %s", url, exc)
         return None
+
+
+def _fabric_snapshot(host: dict) -> dict:
+    now = time.time()
+    url = host["url"]
+    with _cache_lock:
+        cached = _fabric_cache.get(url)
+        if cached and now - cached["fetchedAt"] <= FABRIC_CACHE_TTL_SECONDS:
+            return copy.deepcopy(cached["payload"])
+
+    started_at = time.perf_counter()
+    payload = _safe_get_json(f"{_base_url(url)}/api/fabric/live")
+    result = {
+        "url": url,
+        "name": host["name"],
+        "fetchedAt": now,
+        "fetchDurationMs": int((time.perf_counter() - started_at) * 1000),
+        "isConnected": payload is not None,
+    }
+    if payload is None:
+        result["error"] = "fetch_failed"
+    else:
+        result.update(payload)
+
+    with _cache_lock:
+        _fabric_cache[url] = {"fetchedAt": now, "payload": copy.deepcopy(result)}
+    return result
 
 
 def _runtime_snapshot_uncached(base_url: str) -> dict:
@@ -329,6 +359,22 @@ def _diagnostics(now: float) -> dict:
         "runtimeCacheSize": len(runtime_cache),
         "hosts": host_rows,
     }
+
+
+@fleet_bp.route("/api/fleet/fabric", methods=["GET"])
+@login_required
+def fleet_fabric():
+    started_at = time.perf_counter()
+    fetched_at = time.time()
+    hosts = storage.load_hosts()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=FAN_OUT_WORKERS) as executor:
+        fabric_hosts = list(executor.map(_fabric_snapshot, hosts))
+    return jsonify({
+        "fetchedAt": fetched_at,
+        "fetchDurationMs": int((time.perf_counter() - started_at) * 1000),
+        "cacheTtlSeconds": FABRIC_CACHE_TTL_SECONDS,
+        "hosts": fabric_hosts,
+    })
 
 
 @fleet_bp.route("/api/fleet/snapshot", methods=["GET"])

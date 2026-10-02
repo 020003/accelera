@@ -23,13 +23,12 @@ import concurrent.futures
 import logging
 import time
 from typing import Any
-from urllib.parse import urlparse
-
 import requests
 from flask import Blueprint, g, jsonify, request
 
 import storage
 from api_tokens import api_token_required
+from host_policy import validate_exporter_url
 
 log = logging.getLogger(__name__)
 api_v1_bp = Blueprint("api_v1", __name__)
@@ -45,12 +44,13 @@ def _base_url(host_url: str) -> str:
 
 def _safe_get_json(url: str, timeout: float = HTTP_TIMEOUT) -> dict | None:
     try:
-        # Only allow HTTP/HTTPS exporters reachable on the private net.
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return None
-        r = requests.get(url, timeout=timeout,
-                         headers={"User-Agent": "accelera-api/1.0"})
+        validated = validate_exporter_url(url)
+        r = requests.get(
+            validated.value,
+            timeout=timeout,
+            headers={"User-Agent": "accelera-api/1.0"},
+            allow_redirects=False,
+        )
         if r.status_code != 200:
             return None
         return r.json()

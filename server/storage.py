@@ -12,7 +12,7 @@ import sqlite3
 import threading
 import time
 from collections import defaultdict, deque
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import contextmanager
 
 from config import DATA_DIR, HISTORICAL_DATA_RETENTION
@@ -411,8 +411,8 @@ def get_token_stats(hours: int = 24) -> dict:
         reset (server restart) by attributing only ``curr`` to that
         interval.  This is reset-safe; MAX-MIN is not (a restart mid-
         window inflates the windowed delta by the entire pre-restart
-        history).  MAX-MIN is still used for the *cumulative_* fields
-        which are explicitly "latest peak the counter ever reached".
+        history).  Cumulative fields use the same reset-safe pairwise
+        accounting across all retained snapshots.
       * History buckets are zero-filled across the full window so the
         x-axis is continuous (chart doesn't bunch up around activity).
       * `current_tps` is averaged over the last 5 minutes rather than
@@ -439,26 +439,19 @@ def get_token_stats(hours: int = 24) -> dict:
 
     # -- per-model totals & windowed avg_tokens_per_sec --------------------
     models_raw = db.execute(
-        "SELECT model, "
-        "  MIN(generated_tokens) AS gen_min, MAX(generated_tokens) AS gen_max, "
-        "  MIN(prompt_tokens) AS pt_min,  MAX(prompt_tokens) AS pt_max, "
-        "  MIN(request_count) AS rc_min,  MAX(request_count) AS rc_max, "
-        "  MIN(request_duration_sum) AS rd_min, MAX(request_duration_sum) AS rd_max, "
-        "  MIN(time_per_token_count) AS tpt_cnt_min, MAX(time_per_token_count) AS tpt_cnt_max, "
-        "  MIN(time_per_token_sum)   AS tpt_sum_min, MAX(time_per_token_sum)   AS tpt_sum_max "
-        "FROM token_snapshots WHERE timestamp >= ? "
-        "GROUP BY model",
-        (cutoff,),
+        "SELECT DISTINCT model FROM token_snapshots"
     ).fetchall()
 
     # Pairwise per-model deltas — reset-safe (see docstring).  Computed
     # in a single pass over the time-series so we don't need a second
     # SQL trip.  Same bound on per-interval delta as the chart loop.
     _per_model_rows = db.execute(
-        "SELECT timestamp, model, generated_tokens, prompt_tokens, "
-        "       request_count, request_duration_sum "
-        "FROM token_snapshots WHERE timestamp >= ? ORDER BY model, timestamp",
-        (cutoff,),
+        "SELECT timestamp, model, generated_tokens, prompt_tokens, request_count, "
+        "       request_duration_sum, time_per_token_sum, time_per_token_count "
+        "FROM token_snapshots WHERE timestamp >= ? OR id IN ("
+        "  SELECT MAX(id) FROM token_snapshots WHERE timestamp < ? GROUP BY model"
+        ") ORDER BY model, timestamp",
+        (cutoff, cutoff),
     ).fetchall()
     # Per-interval cap: anything bigger is almost certainly a corrupt
     # snapshot (not a counter reset — those are detected by the
@@ -472,21 +465,47 @@ def get_token_stats(hours: int = 24) -> dict:
     _prev_by_model: dict[str, tuple] = {}
     for r in _per_model_rows:
         m = r["model"]
-        cur = (r["generated_tokens"], r["prompt_tokens"],
-               r["request_count"], r["request_duration_sum"])
+        cur = (r["generated_tokens"], r["prompt_tokens"], r["request_count"],
+               r["request_duration_sum"], r["time_per_token_sum"],
+               r["time_per_token_count"])
         prev = _prev_by_model.get(m)
-        if prev is not None:
+        if prev is not None and r["timestamp"] >= cutoff:
             dg = cur[0] - prev[0] if cur[0] >= prev[0] else cur[0]
             dp = cur[1] - prev[1] if cur[1] >= prev[1] else cur[1]
             dr = cur[2] - prev[2] if cur[2] >= prev[2] else cur[2]
             dd = cur[3] - prev[3] if cur[3] >= prev[3] else cur[3]
+            ds = cur[4] - prev[4] if cur[4] >= prev[4] else cur[4]
+            dc = cur[5] - prev[5] if cur[5] >= prev[5] else cur[5]
             if dg <= _max_delta and dp <= _max_delta:
-                acc = _pairwise.setdefault(m, {"g": 0, "p": 0, "r": 0, "d": 0.0})
+                acc = _pairwise.setdefault(m, {"g": 0, "p": 0, "r": 0, "d": 0.0, "ts": 0.0, "tc": 0})
                 acc["g"] += dg
                 acc["p"] += dp
                 acc["r"] += dr
                 acc["d"] += dd
+                acc["ts"] += ds
+                acc["tc"] += dc
         _prev_by_model[m] = cur
+
+    all_rows = db.execute(
+        "SELECT model, generated_tokens, prompt_tokens, request_count "
+        "FROM token_snapshots ORDER BY model, timestamp"
+    ).fetchall()
+    cumulative_by_model: dict[str, dict[str, int]] = {}
+    cumulative_previous: dict[str, tuple[int, int, int]] = {}
+    for row in all_rows:
+        model = row["model"]
+        current = (row["generated_tokens"], row["prompt_tokens"], row["request_count"])
+        previous = cumulative_previous.get(model)
+        totals = cumulative_by_model.setdefault(model, {"g": 0, "p": 0, "r": 0})
+        if previous is None:
+            totals["g"] += current[0]
+            totals["p"] += current[1]
+            totals["r"] += current[2]
+        else:
+            totals["g"] += current[0] - previous[0] if current[0] >= previous[0] else current[0]
+            totals["p"] += current[1] - previous[1] if current[1] >= previous[1] else current[1]
+            totals["r"] += current[2] - previous[2] if current[2] >= previous[2] else current[2]
+        cumulative_previous[model] = current
 
     models = {}
     total_generated = 0
@@ -497,20 +516,15 @@ def get_token_stats(hours: int = 24) -> dict:
     cumulative_prompt = 0
     cumulative_requests = 0
     for r in models_raw:
-        acc = _pairwise.get(r["model"], {"g": 0, "p": 0, "r": 0, "d": 0.0})
+        acc = _pairwise.get(r["model"], {"g": 0, "p": 0, "r": 0, "d": 0.0, "ts": 0.0, "tc": 0})
+        cumulative = cumulative_by_model.get(r["model"], {"g": 0, "p": 0, "r": 0})
         gen = acc["g"]
         pt = acc["p"]
         rc = acc["r"]
         dur = acc["d"]
-        # Windowed average tokens/sec.  Prefer the dedicated TPT counter
-        # (Δsum / Δcount), but Ollama only updates this on specific code
-        # paths, so fall back to generated_tokens / request_duration —
-        # a sound proxy for sustained inference throughput.
-        d_tpt_sum = max((r["tpt_sum_max"] or 0) - (r["tpt_sum_min"] or 0), 0.0)
-        d_tpt_cnt = max((r["tpt_cnt_max"] or 0) - (r["tpt_cnt_min"] or 0), 0)
-        if d_tpt_cnt > 0 and d_tpt_sum > 0:
-            avg_tpt = d_tpt_sum / d_tpt_cnt
-            tps = (1.0 / avg_tpt) if avg_tpt > 0 else 0
+        if acc["tc"] > 0 and acc["ts"] > 0:
+            avg_tpt = acc["ts"] / acc["tc"]
+            tps = 1.0 / avg_tpt if avg_tpt > 0 else 0
         elif gen > 0 and dur > 0:
             tps = gen / dur
         else:
@@ -521,23 +535,28 @@ def get_token_stats(hours: int = 24) -> dict:
             "requests": rc,
             "total_duration_sec": round(dur, 1),
             "avg_tokens_per_sec": round(tps, 1),
-            "cumulative_generated": r["gen_max"],
-            "cumulative_prompt": r["pt_max"],
-            "cumulative_requests": r["rc_max"],
+            "avg_latency_sec": round(dur / rc, 3) if rc > 0 else 0,
+            "avg_prompt_tokens": round(pt / rc, 1) if rc > 0 else 0,
+            "avg_generated_tokens": round(gen / rc, 1) if rc > 0 else 0,
+            "cumulative_generated": cumulative["g"],
+            "cumulative_prompt": cumulative["p"],
+            "cumulative_requests": cumulative["r"],
         }
         total_generated += gen
         total_prompt += pt
         total_requests += rc
         total_duration += dur
-        cumulative_generated += r["gen_max"]
-        cumulative_prompt += r["pt_max"]
-        cumulative_requests += r["rc_max"]
+        cumulative_generated += cumulative["g"]
+        cumulative_prompt += cumulative["p"]
+        cumulative_requests += cumulative["r"]
 
     # -- time-series ------------------------------------------------------
     rows = db.execute(
         "SELECT timestamp, model, generated_tokens, prompt_tokens "
-        "FROM token_snapshots WHERE timestamp >= ? ORDER BY timestamp",
-        (cutoff,),
+        "FROM token_snapshots WHERE timestamp >= ? OR id IN ("
+        "  SELECT MAX(id) FROM token_snapshots WHERE timestamp < ? GROUP BY model"
+        ") ORDER BY timestamp",
+        (cutoff, cutoff),
     ).fetchall()
 
     from collections import defaultdict as _dd
@@ -583,7 +602,7 @@ def get_token_stats(hours: int = 24) -> dict:
     while bk <= last_bk:
         d = bucket_map.get(bk, {"generated": 0, "prompt": 0})
         history.append({
-            "time": datetime.utcfromtimestamp(bk).isoformat() + "Z",
+            "time": datetime.fromtimestamp(bk, timezone.utc).isoformat().replace("+00:00", "Z"),
             "generated": d["generated"],
             "prompt": d["prompt"],
             "total": d["generated"] + d["prompt"],
@@ -610,10 +629,10 @@ def get_token_stats(hours: int = 24) -> dict:
             if dt > 0 and dg > 0:
                 current_tps += dg / dt
 
-    # NOTE: totals are now computed pairwise above, so no MAX-MIN
-    # fix-up is needed here.  The chart's bucket sums are guaranteed
-    # to be ≤ per-model pairwise totals (they share the same dg/dp
-    # logic), so the two views agree by construction.
+    active_window_sec = min(window_sec, max(0.0, now - rows[0]["timestamp"])) if rows else window_sec
+    peak_generation_tps = max((point["generated"] / bucket_sec for point in history), default=0.0)
+    average_latency = total_duration / total_requests if total_requests > 0 else 0.0
+    tokens_per_request = (total_generated + total_prompt) / total_requests if total_requests > 0 else 0.0
 
     return {
         "summary": {
@@ -623,6 +642,11 @@ def get_token_stats(hours: int = 24) -> dict:
             "total_requests": total_requests,
             "total_duration_sec": round(total_duration, 1),
             "current_tps": round(current_tps, 1),
+            "peak_generation_tps": round(peak_generation_tps, 1),
+            "requests_per_minute": round(total_requests / (active_window_sec / 60), 2) if active_window_sec > 0 else 0,
+            "avg_request_latency_sec": round(average_latency, 3),
+            "avg_tokens_per_request": round(tokens_per_request, 1),
+            "prompt_to_generated_ratio": round(total_prompt / total_generated, 3) if total_generated > 0 else 0,
             "cumulative_generated": cumulative_generated,
             "cumulative_prompt": cumulative_prompt,
             "cumulative_tokens": cumulative_generated + cumulative_prompt,

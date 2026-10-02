@@ -101,6 +101,23 @@ def _read_str(path: str) -> str:
         return ""
 
 
+def _read_indexed_values(path: str, *, limit: int = 8, skip_zero: bool = True) -> list[str]:
+    try:
+        entries = sorted(os.listdir(path), key=lambda value: int(value))
+    except (OSError, ValueError):
+        return []
+    values = []
+    for entry in entries:
+        value = _read_str(f"{path}/{entry}")
+        normalized = value.lower().replace(":", "").removeprefix("0x")
+        if not value or (skip_zero and set(normalized) == {"0"}):
+            continue
+        values.append(value)
+        if len(values) >= limit:
+            break
+    return values
+
+
 def _parse_rate_gbps(raw: str) -> float:
     """`/sys/.../rate` looks like '100 Gb/sec (4X EDR)'."""
     try:
@@ -155,16 +172,35 @@ def _poller_snapshot() -> dict[str, Any] | None:
     return data
 
 
-def _roce_bytes_from_poller(dev: str) -> tuple[int, int, str] | None:
-    """Return (tx_bytes, rx_bytes, iface) for an IB device from the
-    root poller's snapshot.  None if the poller hasn't seen this device."""
+def _roce_bytes_from_poller(dev: str) -> tuple[int, int, int, int, str] | None:
+    """Return total and RDMA bytes plus iface for a RoCE device.
+
+    RDMA counters are transport-level signals. They can identify traffic that
+    is compatible with NCCL-over-RoCE, but cannot attribute it to an NCCL job.
+    """
     snap = _poller_snapshot()
     if snap is None:
         return None
     port = snap.get("ports", {}).get(dev)
     if not port:
         return None
-    return port["tx_bytes"], port["rx_bytes"], port.get("iface", "")
+    return (
+        port["tx_bytes"],
+        port["rx_bytes"],
+        port.get("tx_rdma_bytes", 0),
+        port.get("rx_rdma_bytes", 0),
+        port.get("iface", ""),
+    )
+
+
+def _roce_metadata_from_poller(dev: str) -> dict[str, Any]:
+    snap = _poller_snapshot()
+    if snap is None:
+        return {}
+    port = snap.get("ports", {}).get(dev)
+    if not port:
+        return {}
+    return {key: port[key] for key in ("lid", "sm_lid", "physical_state", "gids", "pkeys") if key in port}
 
 
 def _collect_infiniband(now: float) -> list[dict[str, Any]]:
@@ -198,12 +234,16 @@ def _collect_infiniband(now: float) -> list[dict[str, Any]]:
             #     empirically.  Fall back to ethtool vport counters which
             #     are authoritative.
             tx_bytes = rx_bytes = None
+            rdma_tx_bytes = rdma_rx_bytes = None
+            netdev = _ib_netdev(dev) or ""
+            poller_metadata: dict[str, Any] = {}
             counter_source = "ib"
             if link_layer == "Ethernet":
-                triple = _roce_bytes_from_poller(dev)
-                if triple is not None:
-                    tx_bytes, rx_bytes, iface = triple
-                    counter_source = f"vport:{iface}"
+                sample = _roce_bytes_from_poller(dev)
+                if sample is not None:
+                    tx_bytes, rx_bytes, rdma_tx_bytes, rdma_rx_bytes, netdev = sample
+                    poller_metadata = _roce_metadata_from_poller(dev)
+                    counter_source = f"vport:{netdev}"
 
             if tx_bytes is None or rx_bytes is None:
                 tx_words = _read_int(f"{counters}/port_xmit_data")
@@ -216,6 +256,8 @@ def _collect_infiniband(now: float) -> list[dict[str, Any]]:
 
             tx_bps = _rate(f"ib:{dev}:{p}:tx", tx_bytes, now)
             rx_bps = _rate(f"ib:{dev}:{p}:rx", rx_bytes, now)
+            rdma_tx_bps = _rate(f"ib:{dev}:{p}:rdma-tx", rdma_tx_bytes, now) if rdma_tx_bytes is not None else None
+            rdma_rx_bps = _rate(f"ib:{dev}:{p}:rdma-rx", rdma_rx_bytes, now) if rdma_rx_bytes is not None else None
             link_downed = _read_int(f"{counters}/link_downed") or 0
             symbol_errors = _read_int(f"{counters}/symbol_error") or 0
             out.append({
@@ -224,10 +266,19 @@ def _collect_infiniband(now: float) -> list[dict[str, Any]]:
                 "state": _parse_state(_read_str(f"{base}/state")),
                 "rate_gbps": _parse_rate_gbps(_read_str(f"{base}/rate")),
                 "link_layer": _read_str(f"{base}/link_layer") or "Unknown",
+                "lid": poller_metadata.get("lid", _read_str(f"{base}/lid") or "N/A"),
+                "sm_lid": poller_metadata.get("sm_lid", _read_str(f"{base}/sm_lid") or "N/A"),
+                "physical_state": _parse_state(poller_metadata.get("physical_state", _read_str(f"{base}/phys_state"))),
+                "gids": poller_metadata.get("gids", _read_indexed_values(f"{base}/gids")),
+                "pkeys": poller_metadata.get("pkeys", _read_indexed_values(f"{base}/pkeys")),
+                "netdev": netdev or None,
                 "tx_bytes": tx_bytes,
                 "rx_bytes": rx_bytes,
                 "tx_bps": tx_bps,
                 "rx_bps": rx_bps,
+                "rdma_tx_bps": rdma_tx_bps,
+                "rdma_rx_bps": rdma_rx_bps,
+                "rdma_available": rdma_tx_bps is not None and rdma_rx_bps is not None,
                 "counter_source": counter_source,
                 "errors": {
                     "link_downed": link_downed,
@@ -372,4 +423,6 @@ def fabric_live():
         "timestamp": now,
         "nvlink": nvlink,
         "infiniband": ib,
+        "ncclAttribution": "inferred",
+        "ncclAttributionNote": "RDMA and NVLink activity are transport signals only; per-communicator NCCL attribution requires an instrumented workload.",
     })

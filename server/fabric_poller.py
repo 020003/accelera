@@ -60,6 +60,55 @@ def _ib_netdev(ib_dev: str, ib_root: str) -> str | None:
         return None
 
 
+def _host_sys_read(path: str) -> str:
+    command = ["cat", path]
+    if os.path.exists("/usr/bin/nsenter"):
+        command = ["nsenter", "-t", "1", "-m", "-n", "--", *command]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=2, check=False)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _host_indexed_values(path: str, limit: int = 8) -> list[str]:
+    command = ["ls", path]
+    if os.path.exists("/usr/bin/nsenter"):
+        command = ["nsenter", "-t", "1", "-m", "-n", "--", *command]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=2, check=False)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    if result.returncode != 0:
+        return []
+    try:
+        entries = sorted(result.stdout.split(), key=int)
+    except ValueError:
+        return []
+    values = []
+    for entry in entries:
+        value = _host_sys_read(f"{path}/{entry}")
+        normalized = value.lower().replace(":", "").removeprefix("0x")
+        if not value or set(normalized) == {"0"}:
+            continue
+        values.append(value)
+        if len(values) >= limit:
+            break
+    return values
+
+
+def _port_metadata(dev: str, port: str = "1") -> dict[str, Any]:
+    base = f"/sys/class/infiniband/{dev}/ports/{port}"
+    return {
+        "port": int(port),
+        "lid": _host_sys_read(f"{base}/lid") or "N/A",
+        "sm_lid": _host_sys_read(f"{base}/sm_lid") or "N/A",
+        "physical_state": _host_sys_read(f"{base}/phys_state") or "UNKNOWN",
+        "gids": _host_indexed_values(f"{base}/gids"),
+        "pkeys": _host_indexed_values(f"{base}/pkeys"),
+    }
+
+
 def _ethtool_stats(iface: str) -> dict[str, int]:
     try:
         out = subprocess.run(
@@ -114,6 +163,7 @@ def collect_once() -> dict[str, Any]:
             "rx_bytes": rx,
             "tx_rdma_bytes": s.get("tx_vport_rdma_unicast_bytes", 0),
             "rx_rdma_bytes": s.get("rx_vport_rdma_unicast_bytes", 0),
+            **_port_metadata(dev),
         }
     return out
 
