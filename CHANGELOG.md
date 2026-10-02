@@ -1,5 +1,40 @@
 # Changelog
 
+## [2.5.0] — 2026-10-02
+
+### Added
+- **vLLM Operations panel** — per-model vLLM metrics on host tabs (live throughput, queue/running state, latency charts), backed by a new LLM status endpoint.
+- **InfiniBand / RoCE Inspector** — per-port logical/physical state, rate, link layer, netdev, live TX/RX and RDMA rates, counters, errors, GIDs and P_Keys with copy-to-clipboard.
+- **RDMA metrics** — `/api/fabric/live` reports RDMA byte rates and port metadata alongside total traffic.
+- **Fleet fabric endpoint** — authenticated `GET /api/fleet/fabric` aggregates fabric telemetry from all hosts with a short central cache (`FLEET_FABRIC_CACHE_TTL_SECONDS`).
+- **Central fleet snapshot** — `/api/fleet/snapshot` polls all exporters centrally with cache/freshness metadata (live / cached / stale per host) surfaced in the header and Overview.
+- **Load benchmark** — `POST /api/benchmarks/load` runs concurrent (optionally mixed-prompt) requests and summarises latency, TTFT and throughput distributions.
+- **GPU Fleet Map** on the Overview — one tile per GPU across every host, colour-coded by threshold (idle / normal / elevated / critical).  Switch between Utilization, VRAM, Temperature and Power; hover a tile for a full per-GPU breakdown (all four metrics, VRAM GB, W, process count); click a tile or host to open that host's tab.  Header line summarises busy / idle / hot / VRAM-saturated GPUs and offline hosts.  Selected metric persists in `localStorage`.
+- **CSV export** of the current per-GPU fleet snapshot (button on the fleet map and in the command palette).  Cells are formula-injection safe.
+- **Command palette** (`Ctrl/⌘+K`, or the *Search…* button in the header) — fuzzy-jump to any section or host, refresh now, export CSV, toggle theme, switch refresh mode.  `Alt+1…6` jumps directly between Overview / Visualizations / Costs / Alerts / GPU Health / Settings.
+- **Deep-linkable tabs** — the active tab is mirrored to the URL hash (`#tab=…`) so views can be bookmarked and shared; unknown host tabs fall back to Overview.
+- **Live browser-tab title** — e.g. `Accelera · 4/4 hosts · 25% util`, prefixed with `(N offline)` when hosts drop.
+
+### Changed
+- **Streaming benchmarks** — single runs stream from OpenAI-compatible endpoints to measure time-to-first-token and generation time separately.
+- **Nginx exporter proxy** read timeout raised from 120 s to 600 s so long benchmark runs complete.
+- **Docker Compose** — removed the obsolete `version` key; healthchecks target `127.0.0.1`.  Deployment-specific allowlists (`ALLOWED_PROXY_RANGE`, `ALLOWED_EXPORTER_HOSTS`) now default to deny-all and must be set in `.env`.
+- **Redesigned per-GPU cards** on host tabs — short model name, status pill (Idle / Active / Hot / VRAM full), accessible `role="meter"` bars with threshold colours shared with the fleet map, VRAM GB and power-cap %, top-5 processes sorted by memory with a "+N more" line.  Fan section is hidden for passively-cooled GPUs that report `fan: null`.
+- **Overview KPIs** — slim threshold gauges under Utilization / VRAM / Temp / Power, power shows % of aggregate cap, 9-column layout on wide screens, subtle hover lift.
+- **Host Fleet list** — rows are clickable (open host tab), show a utilization bar, a vLLM model badge, amber dot for stale snapshots, and the last error for offline hosts.
+- Host tab runtime letters (O / S / V) now have tooltips with model counts; host status dot is amber when stale and red when offline.
+- Thin themed scrollbar for the tab strip.
+
+### Fixed
+- **Token counting** — totals use reset-safe pairwise deltas (including time-per-token) and a baseline from the last snapshot before the window, so counter restarts no longer skew stats.
+
+### Security
+- **Exporter host allowlist** — exporter URLs are validated against `ALLOWED_EXPORTER_HOSTS` (literal IPs only), a fixed exporter port, no credentials/query/fragment, and redirects are not followed — closes SSRF via the host list.
+- **CSRF protection** — state-changing session requests require a session-bound `X-CSRF-Token`; bearer-token `/api/v1` calls are exempt.
+- **Session fixation** — the session is cleared on login and initial setup before the new identity is stored.
+
+---
+
 ## [2.4.0] — 2026-05-18
 
 ### Added

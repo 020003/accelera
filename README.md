@@ -19,6 +19,9 @@ Real-time monitoring, AI workload management, and cluster analytics for NVIDIA G
 - **Multi-host** — monitor unlimited servers from a single pane
 - **Fleet-wide token stats** — aggregate prompt/generated tokens, tokens/sec, cost estimation across all hosts
 - **Time-range picker** — toggle 1 h / 6 h / 12 h / 24 h / 3 d / 7 d windows on overview and per-host stats
+- **GPU Fleet Map** — per-GPU tiles for every host, colour-coded by utilization / VRAM / temperature / power, with hover breakdowns, click-through to the host and one-click CSV export
+- **Command palette** — `Ctrl/⌘+K` to jump to any host or section and run actions (refresh, export, theme, refresh mode); `Alt+1…6` section shortcuts
+- **Deep links** — the active tab is kept in the URL hash (`#tab=…`) for bookmarking and sharing
 - **Per-host detail tabs** — deep-dive into individual server metrics, Ollama models, and token history
 
 ### AI Workload Integration

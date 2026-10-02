@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Sun, Moon, Timer, AlertTriangle } from "lucide-react";
+import { Sun, Moon, Timer, AlertTriangle, Search } from "lucide-react";
 import type { HostData } from "@/types/dashboard";
 
 interface FleetFreshnessSummary {
@@ -28,7 +28,10 @@ interface DashboardHeaderProps {
   refreshInterval: number;
   fleetFetchDurationMs?: number;
   fleetFreshness?: FleetFreshnessSummary;
+  onOpenPalette?: () => void;
 }
+
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
 
 export function DashboardHeader({
   theme,
@@ -44,6 +47,7 @@ export function DashboardHeader({
   refreshInterval,
   fleetFetchDurationMs,
   fleetFreshness,
+  onOpenPalette,
 }: DashboardHeaderProps) {
   const staleHosts = fleetFreshness?.staleHosts || 0;
   const cachedHosts = fleetFreshness?.cachedHosts || 0;
@@ -92,6 +96,24 @@ export function DashboardHeader({
                 </Badge>
               )}
             </div>
+            {onOpenPalette && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onOpenPalette}
+                className="h-8 gap-2 border-border/60 bg-background/40 px-2 text-xs text-muted-foreground hover:text-foreground sm:w-44 sm:justify-between sm:px-2.5"
+                title="Search hosts, sections and actions"
+                aria-label="Open command palette"
+              >
+                <span className="flex items-center gap-2">
+                  <Search className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Search…</span>
+                </span>
+                <kbd className="pointer-events-none hidden select-none rounded border border-border/70 bg-muted/60 px-1.5 font-mono text-[10px] font-medium sm:inline-block">
+                  {IS_MAC ? "⌘" : "Ctrl"} K
+                </kbd>
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"

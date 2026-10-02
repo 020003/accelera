@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import { useFleetHosts } from "@/hooks/useFleetHosts";
 import { useTopology } from "@/hooks/useTopology";
@@ -21,6 +21,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
 import { proxyUrl } from "@/lib/proxy";
 import { useTheme } from "@/hooks/useTheme";
+import { CommandPalette, DASHBOARD_SECTIONS } from "@/components/CommandPalette";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { exportFleetCsv } from "@/lib/fleetMetrics";
 
 type PerformanceMode = "realtime" | "balanced" | "low-load" | "manual";
 
@@ -30,6 +33,25 @@ const PERFORMANCE_INTERVALS: Record<PerformanceMode, number> = {
   "low-load": 30000,
   manual: 0,
 };
+
+const SECTION_TABS = new Set<string>(DASHBOARD_SECTIONS.map((s) => s.value));
+
+// Active tab is mirrored into the URL hash (`#tab=<value>`) so views can be bookmarked and shared.
+function readTabFromHash(): string {
+  const match = window.location.hash.match(/^#tab=(.+)$/);
+  if (!match) return "overview";
+  try {
+    return decodeURIComponent(match[1]) || "overview";
+  } catch {
+    return "overview";
+  }
+}
+
+const RUNTIME_BADGES = [
+  { key: "ollama", letter: "O", label: "Ollama", className: "bg-purple-500/15 text-purple-400 ring-purple-500/30" },
+  { key: "sglang", letter: "S", label: "SGLang", className: "bg-cyan-500/15 text-cyan-400 ring-cyan-500/30" },
+  { key: "vllm", letter: "V", label: "vLLM", className: "bg-orange-500/15 text-orange-400 ring-orange-500/30" },
+] as const;
 
 interface HeatmapResponse {
   hosts?: unknown[];
@@ -61,6 +83,7 @@ export default function Dashboard() {
   const {
     hosts,
     setHosts,
+    hostsLoaded,
     hostsData,
     fleetFreshness,
     fleetFetchDurationMs,
@@ -68,7 +91,29 @@ export default function Dashboard() {
     runtimeCacheTtlSeconds,
     fetchAllHostsData,
   } = useFleetHosts({ demo, refreshInterval });
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTabState] = useState<string>(readTabFromHash);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const setActiveTab = useCallback((tab: string) => {
+    setActiveTabState(tab);
+    const hash = tab === "overview" ? "" : `#tab=${encodeURIComponent(tab)}`;
+    if (window.location.hash !== hash) {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${hash}`);
+    }
+  }, []);
+
+  useEffect(() => {
+    const onHashChange = () => setActiveTabState(readTabFromHash());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  // Fall back to the overview when a bookmarked host tab no longer exists. Host tabs are
+  // rendered from the polled snapshot (hostsData), so validate against it once it has arrived.
+  useEffect(() => {
+    if (!hostsLoaded || demo || SECTION_TABS.has(activeTab)) return;
+    if (hostsData.length === 0 && hosts.length > 0) return;
+    if (!hostsData.some((h) => h.url === activeTab)) setActiveTab("overview");
+  }, [hostsLoaded, demo, hosts.length, hostsData, activeTab, setActiveTab]);
   const { data: topologyData } = useTopology();
   const [heatmapData, setHeatmapData] = useState(null);
   const [advancedDataLoaded, setAdvancedDataLoaded] = useState(false);
@@ -193,11 +238,18 @@ export default function Dashboard() {
   const hostsWithOllama = hostsData.filter(h => h.ollama?.isAvailable).length;
   const hostsWithSglang = hostsData.filter(h => h.sglang?.isAvailable).length;
   const hostsWithVllm = hostsData.filter(h => h.vllm?.isAvailable).length;
+  const offlineHosts = hostsData.filter(h => !h.isConnected).length;
+  const fleetUtil = totalGpus > 0
+    ? Math.round(connectedHosts.reduce((s, h) => s + h.gpus.reduce((a, g) => a + g.utilization, 0), 0) / totalGpus)
+    : 0;
+  const pageTitle = hostsData.length > 0
+    ? `${offlineHosts > 0 ? `(${offlineHosts} offline) ` : ""}Accelera · ${connectedHosts.length}/${hostsData.length} hosts · ${fleetUtil}% util`
+    : "Accelera - High-Performance GPU Acceleration Platform";
 
   return (
     <div className="dashboard-canvas min-h-screen bg-background">
       <Helmet>
-        <title>Accelera - High-Performance GPU Acceleration Platform</title>
+        <title>{pageTitle}</title>
         <meta name="description" content="Professional GPU acceleration platform for NVIDIA graphics cards with advanced AI workload management, real-time monitoring, and performance optimization." />
       </Helmet>
 
@@ -215,13 +267,33 @@ export default function Dashboard() {
         refreshInterval={refreshInterval}
         fleetFetchDurationMs={fleetFetchDurationMs}
         fleetFreshness={fleetFreshness}
+        onOpenPalette={() => setPaletteOpen(true)}
+      />
+
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        hostsData={hostsData}
+        onNavigate={setActiveTab}
+        onRefresh={() => {
+          fetchAllHostsData();
+          toast.success("Refreshing fleet data");
+        }}
+        onToggleTheme={toggleTheme}
+        theme={theme}
+        onExportCsv={() => exportFleetCsv(hostsData)}
+        performanceMode={performanceMode}
+        onPerformanceMode={(mode) => {
+          handlePerformanceMode(mode);
+          toast.info(`Refresh mode: ${mode.replace("-", " ")}`);
+        }}
       />
 
       <main className="mx-auto max-w-[1800px] space-y-6 px-4 py-5 sm:px-6 sm:py-6">
 
         {/* Tabbed Interface */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <div className="sticky top-[65px] z-40 -mx-1 overflow-x-auto px-1 pb-1">
+          <div className="nav-scroller sticky top-[65px] z-40 -mx-1 overflow-x-auto px-1 pb-1">
           <TabsList className="nav-strip flex h-auto min-w-max flex-nowrap justify-start gap-1 rounded-xl p-1.5">
             <TabsTrigger value="overview" className="h-9 shrink-0 gap-1.5 rounded-lg px-3 text-xs data-[state=active]:shadow-sm">
               <BarChart3 className="h-4 w-4" />
@@ -239,18 +311,25 @@ export default function Dashboard() {
               <TabsTrigger key={host.url} value={host.url} className="h-9 shrink-0 gap-1.5 rounded-lg px-3 text-xs data-[state=active]:shadow-sm">
                 <Monitor className="h-4 w-4" />
                 {host.name}
-                {host.isConnected && (
-                  <div className="w-2 h-2 bg-accelera-green rounded-full" />
-                )}
-                {host.ollama?.isAvailable && (
-                  <span className="text-[9px] px-1 py-0.5 rounded bg-purple-500/10 text-purple-400 font-medium leading-none">O</span>
-                )}
-                {host.sglang?.isAvailable && (
-                  <span className="text-[9px] px-1 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-medium leading-none">S</span>
-                )}
-                {host.vllm?.isAvailable && (
-                  <span className="text-[9px] px-1 py-0.5 rounded bg-orange-500/10 text-orange-400 font-medium leading-none">V</span>
-                )}
+                <span
+                  className={`h-2 w-2 rounded-full ${host.isConnected ? (host.stale ? "bg-amber-500" : "bg-accelera-green") : "bg-red-500"}`}
+                  aria-label={host.isConnected ? (host.stale ? "stale" : "online") : "offline"}
+                />
+                {RUNTIME_BADGES.filter((b) => host[b.key]?.isAvailable).map((b) => (
+                  <Tooltip key={b.key}>
+                    <TooltipTrigger asChild>
+                      <span
+                        className={`rounded px-1 py-0.5 text-[9px] font-semibold leading-none ring-1 ring-inset ${b.className}`}
+                        aria-label={`${b.label}: ${host[b.key]?.models.length ?? 0} model(s)`}
+                      >
+                        {b.letter}
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs">
+                      {b.label} · {host[b.key]?.models.length ?? 0} model{(host[b.key]?.models.length ?? 0) !== 1 ? "s" : ""}
+                    </TooltipContent>
+                  </Tooltip>
+                ))}
               </TabsTrigger>
             ))}
             <TabsTrigger value="alerts" className="h-9 shrink-0 gap-1.5 rounded-lg px-3 text-xs data-[state=active]:shadow-sm">
@@ -296,6 +375,7 @@ export default function Dashboard() {
                   energyRate={energyRate}
                   currencySymbol={currency.symbol}
                   fleetFreshness={fleetFreshness}
+                  onSelectHost={setActiveTab}
                 />
                 <PowerUsageChart 
                   hosts={hosts} 

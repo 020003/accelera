@@ -11,7 +11,7 @@ export function DashboardFooter({ totalGpus, connectedHosts, totalAiModels }: Da
     <footer className="border-t bg-card/50">
       <div className="container mx-auto px-4 py-3 sm:py-4">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-1 text-xs sm:text-sm text-muted-foreground">
-          <div>Accelera v2.1.0 — GPU Monitoring Platform</div>
+          <div>Accelera v2.5.0 — GPU Monitoring Platform</div>
           <div className="hidden sm:flex items-center gap-4">
             {totalGpus > 0 && (
               <span>

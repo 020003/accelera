@@ -31,6 +31,9 @@ import {
   Clock,
 } from "lucide-react";
 import { useFleetTokenStats } from "@/hooks/useFleetTokenStats";
+import { GpuFleetMap } from "@/components/GpuFleetMap";
+import { LEVEL_STYLES, metricFill, metricLevel, type FleetMetric } from "@/lib/fleetMetrics";
+import { cn } from "@/lib/utils";
 import type { HostData } from "@/types/dashboard";
 
 interface FleetFreshnessSummary {
@@ -49,6 +52,18 @@ interface MultiHostOverviewProps {
   energyRate: number;
   currencySymbol?: string;
   fleetFreshness?: FleetFreshnessSummary;
+  onSelectHost?: (hostUrl: string) => void;
+}
+
+interface Kpi {
+  label: string;
+  value: string | number;
+  icon: typeof Server;
+  color: string;
+  bg: string;
+  sub?: string;
+  /** Optional bottom gauge; `value` is in the metric's native unit. */
+  meter?: { value: number; metric: FleetMetric };
 }
 
 function fmt(n: number): string {
@@ -72,7 +87,7 @@ const TIME_RANGES = [
   { label: "7d", hours: 168 },
 ] as const;
 
-export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$", fleetFreshness }: MultiHostOverviewProps) {
+export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$", fleetFreshness, onSelectHost }: MultiHostOverviewProps) {
   const [hours, setHours] = useState(24);
   const connectedHosts = hostsData.filter((h) => h.isConnected);
   const allGpus = connectedHosts.flatMap((h) => h.gpus);
@@ -87,6 +102,8 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$",
       ? Math.round(allGpus.reduce((s, g) => s + g.temperature, 0) / totalGpus)
       : 0;
   const totalPower = allGpus.reduce((s, g) => s + g.power.draw, 0);
+  const totalPowerLimit = allGpus.reduce((s, g) => s + (g.power.limit || 0), 0);
+  const powerPct = totalPowerLimit > 0 ? Math.round((totalPower / totalPowerLimit) * 100) : 0;
   const memUsed = allGpus.reduce((s, g) => s + g.memory.used, 0);
   const memTotal = allGpus.reduce((s, g) => s + g.memory.total, 0);
   const memPct = memTotal > 0 ? Math.round((memUsed / memTotal) * 100) : 0;
@@ -167,8 +184,8 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$",
       </div>
 
       {/* ─── Hero KPIs ─── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
-        {[
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-9">
+        {([
           {
             label: "Hosts Online",
             value: `${connectedHosts.length}/${hostsData.length}`,
@@ -189,6 +206,7 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$",
             icon: Activity,
             color: avgUtil >= 80 ? "text-amber-500" : "text-blue-500",
             bg: avgUtil >= 80 ? "bg-amber-500/10" : "bg-blue-500/10",
+            meter: { value: avgUtil, metric: "utilization" },
           },
           {
             label: "VRAM",
@@ -197,6 +215,7 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$",
             color: memPct >= 80 ? "text-red-500" : "text-purple-500",
             bg: memPct >= 80 ? "bg-red-500/10" : "bg-purple-500/10",
             sub: `${Math.round(memUsed / 1024)}/${Math.round(memTotal / 1024)} GB`,
+            meter: { value: memPct, metric: "memory" },
           },
           {
             label: "Avg Temp",
@@ -214,6 +233,7 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$",
                 : avgTemp >= 70
                 ? "bg-amber-500/10"
                 : "bg-emerald-500/10",
+            meter: totalGpus > 0 ? { value: avgTemp, metric: "temperature" } : undefined,
           },
           {
             label: "Power Draw",
@@ -223,8 +243,11 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$",
             bg: "bg-amber-500/10",
             sub:
               energyRate > 0
-                ? `${currencySymbol}${hourlyCost.toFixed(2)}/hr`
+                ? `${currencySymbol}${hourlyCost.toFixed(2)}/hr · ${powerPct}% of cap`
+                : totalPowerLimit > 0
+                ? `${powerPct}% of ${Math.round(totalPowerLimit)}W cap`
                 : undefined,
+            meter: totalPowerLimit > 0 ? { value: powerPct, metric: "power" } : undefined,
           },
           {
             label: `${rangeLabel} Tokens`,
@@ -264,10 +287,11 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$",
               ? `${fleetFreshness.cachedHosts} cached · ${fleetFreshness.staleHosts} stale`
               : undefined,
           },
-        ].map((kpi) => {
+        ] as Kpi[]).map((kpi) => {
           const Icon = kpi.icon;
+          const meterLevel = kpi.meter ? metricLevel(kpi.meter.value, kpi.meter.metric) : null;
           return (
-            <Card key={kpi.label} className="shadow-none border-border/50">
+            <Card key={kpi.label} className="kpi-card relative overflow-hidden border-border/50 shadow-none">
               <CardContent className="p-3">
                 <div className="flex items-start gap-2.5">
                   <div className={`p-1.5 rounded-md ${kpi.bg} mt-0.5`}>
@@ -280,18 +304,29 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$",
                     <div className="text-lg font-bold font-mono leading-tight">
                       {kpi.value}
                     </div>
-                    {"sub" in kpi && kpi.sub && (
-                      <div className="text-[10px] text-muted-foreground truncate">
+                    {kpi.sub && (
+                      <div className="text-[10px] text-muted-foreground truncate" title={kpi.sub}>
                         {kpi.sub}
                       </div>
                     )}
                   </div>
                 </div>
               </CardContent>
+              {kpi.meter && meterLevel && (
+                <div className="absolute inset-x-0 bottom-0 h-0.5 bg-muted/60" aria-hidden="true">
+                  <div
+                    className={cn("h-full transition-[width] duration-700 ease-out", LEVEL_STYLES[meterLevel].bar)}
+                    style={{ width: `${metricFill(kpi.meter.value, kpi.meter.metric)}%` }}
+                  />
+                </div>
+              )}
             </Card>
           );
         })}
       </div>
+
+      {/* ─── Per-GPU fleet map ─── */}
+      {hostsData.length > 0 && <GpuFleetMap hostsData={hostsData} onSelectHost={onSelectHost} />}
 
       {/* ─── Charts row ─── */}
       <div className="grid gap-4 lg:grid-cols-2">
@@ -602,16 +637,19 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$",
                 );
                 const hostTokens = fleet?.perHost[host.url];
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={host.url}
-                    className="p-2.5 rounded-lg bg-muted/30 space-y-1.5"
+                    onClick={() => onSelectHost?.(host.url)}
+                    className="block w-full space-y-1.5 rounded-lg bg-muted/30 p-2.5 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    title={`Open ${host.name}`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div
                           className={`w-2 h-2 rounded-full ${
                             host.isConnected
-                              ? "bg-emerald-500"
+                              ? host.stale ? "bg-amber-500" : "bg-emerald-500"
                               : "bg-red-500"
                           }`}
                         />
@@ -636,6 +674,16 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$",
                             {host.sglang.models.length}
                           </Badge>
                         )}
+                        {host.vllm?.isAvailable && (
+                          <Badge
+                            variant="secondary"
+                            className="text-[9px] h-4 px-1.5 bg-orange-500/10 text-orange-400"
+                            title="vLLM models"
+                          >
+                            <Zap className="h-2.5 w-2.5 mr-0.5" />
+                            {host.vllm.models.length}
+                          </Badge>
+                        )}
                         <Badge
                           variant={host.isConnected ? "default" : "secondary"}
                           className="text-[9px] h-4 px-1.5"
@@ -658,7 +706,18 @@ export function MultiHostOverview({ hostsData, energyRate, currencySymbol = "$",
                         )}
                       </div>
                     )}
-                  </div>
+                    {host.isConnected && gpus.length > 0 && (
+                      <div className="h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                        <div
+                          className={cn("h-full rounded-full transition-[width] duration-700", LEVEL_STYLES[metricLevel(util, "utilization")].bar)}
+                          style={{ width: `${Math.max(util, 2)}%` }}
+                        />
+                      </div>
+                    )}
+                    {!host.isConnected && host.error && (
+                      <div className="truncate text-[10px] text-red-500" title={host.error}>{host.error}</div>
+                    )}
+                  </button>
                 );
               })}
             </div>
